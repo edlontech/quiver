@@ -1,0 +1,195 @@
+defmodule Quiver.Transport.SSL do
+  @moduledoc """
+  SSL/TLS transport wrapping `:ssl`.
+
+  Uses the OS certificate store via `:public_key.cacerts_get/0` and
+  ssl_verify_fun for hostname verification by default.
+  """
+
+  @behaviour Quiver.Transport
+
+  use TypedStruct
+
+  alias Quiver.Config
+  alias Quiver.Error.ConnectionClosed
+  alias Quiver.Error.ConnectionFailed
+  alias Quiver.Error.ConnectionRefused
+  alias Quiver.Error.DNSResolutionFailed
+  alias Quiver.Error.Timeout
+  alias Quiver.Error.TLSHandshakeFailed
+  alias Quiver.Error.TLSVerificationFailed
+
+  typedstruct do
+    field(:socket, :ssl.sslsocket(), enforce: true)
+    field(:negotiated_protocol, binary() | nil, default: nil)
+  end
+
+  @impl true
+  def connect(host, port, opts) do
+    with {:ok, validated} <- Config.validate_ssl(opts) do
+      :ssl.start()
+
+      ssl_opts =
+        base_ssl_opts(host, validated)
+        |> add_verification(to_charlist(host), validated)
+        |> add_alpn(validated)
+
+      validated[:connect_timeout]
+      |> do_connect(to_charlist(host), port, ssl_opts)
+      |> handle_connect_result(host, port)
+    end
+  end
+
+  @impl true
+  def send(%__MODULE__{socket: socket} = transport, data) do
+    case :ssl.send(socket, data) do
+      :ok ->
+        {:ok, transport}
+
+      {:error, :closed} ->
+        {:error, transport, ConnectionClosed.exception(message: "socket closed")}
+
+      {:error, :timeout} ->
+        {:error, transport, Timeout.exception(message: "send timeout")}
+
+      {:error, reason} ->
+        {:error, transport, reason}
+    end
+  end
+
+  @impl true
+  def recv(%__MODULE__{socket: socket} = transport, length, timeout) do
+    case :ssl.recv(socket, length, timeout) do
+      {:ok, data} ->
+        {:ok, transport, data}
+
+      {:error, :closed} ->
+        {:error, transport, ConnectionClosed.exception(message: "socket closed")}
+
+      {:error, :timeout} ->
+        {:error, transport, Timeout.exception(message: "recv timeout")}
+
+      {:error, reason} ->
+        {:error, transport, reason}
+    end
+  end
+
+  @impl true
+  def close(%__MODULE__{socket: socket} = transport) do
+    :ssl.close(socket)
+    {:ok, transport}
+  end
+
+  @impl true
+  def activate(%__MODULE__{socket: socket} = transport) do
+    case :ssl.setopts(socket, active: :once) do
+      :ok -> {:ok, transport}
+      {:error, reason} -> {:error, transport, reason}
+    end
+  end
+
+  @impl true
+  def controlling_process(%__MODULE__{socket: socket} = transport, pid) do
+    case :ssl.controlling_process(socket, pid) do
+      :ok -> {:ok, transport}
+      {:error, reason} -> {:error, transport, reason}
+    end
+  end
+
+  @spec negotiated_protocol(t()) :: binary() | nil
+  def negotiated_protocol(%__MODULE__{negotiated_protocol: proto}), do: proto
+
+  defp base_ssl_opts(host, validated) do
+    [
+      :binary,
+      active: false,
+      packet: :raw,
+      buffer: validated[:buffer_size],
+      server_name_indication: to_charlist(host)
+    ]
+  end
+
+  defp do_connect(timeout, host_charlist, port, ssl_opts) do
+    :ssl.connect(host_charlist, port, ssl_opts, timeout)
+  end
+
+  defp handle_connect_result({:ok, socket}, _host, _port) do
+    protocol =
+      case :ssl.negotiated_protocol(socket) do
+        {:ok, proto} -> proto
+        _ -> nil
+      end
+
+    {:ok, %__MODULE__{socket: socket, negotiated_protocol: protocol}}
+  end
+
+  defp handle_connect_result({:error, {:tls_alert, _} = reason}, host, _port) do
+    classify_tls_error(host, reason)
+  end
+
+  defp handle_connect_result({:error, {:options, _} = reason}, _host, _port) do
+    {:error, TLSHandshakeFailed.exception(reason: reason)}
+  end
+
+  defp handle_connect_result({:error, :timeout}, host, port) do
+    {:error, Timeout.exception(message: "TLS connect timeout to #{host}:#{port}")}
+  end
+
+  defp handle_connect_result({:error, :nxdomain}, host, _port) do
+    {:error, DNSResolutionFailed.exception(host: host)}
+  end
+
+  defp handle_connect_result({:error, :econnrefused}, host, port) do
+    {:error, ConnectionRefused.exception(message: "connection refused to #{host}:#{port}")}
+  end
+
+  defp handle_connect_result({:error, reason}, host, port) do
+    {:error,
+     ConnectionFailed.exception(
+       message: "TLS connect failed to #{host}:#{port}: #{inspect(reason)}"
+     )}
+  end
+
+  defp add_verification(ssl_opts, host_charlist, validated) do
+    case validated[:verify] do
+      :verify_peer ->
+        cacerts = resolve_cacerts(validated[:cacerts])
+
+        ssl_opts ++
+          [
+            verify: :verify_peer,
+            cacerts: cacerts,
+            verify_fun: {&:ssl_verify_hostname.verify_fun/3, [check_hostname: host_charlist]},
+            depth: 3
+          ]
+
+      :verify_none ->
+        ssl_opts ++ [verify: :verify_none]
+    end
+  end
+
+  defp add_alpn(ssl_opts, validated) do
+    case validated[:alpn_advertised_protocols] do
+      [] -> ssl_opts
+      protocols -> ssl_opts ++ [alpn_advertised_protocols: protocols]
+    end
+  end
+
+  defp resolve_cacerts(:default), do: :public_key.cacerts_get()
+  defp resolve_cacerts(certs) when is_list(certs), do: certs
+
+  defp classify_tls_error(host, {:tls_alert, {alert_type, _}})
+       when alert_type in [
+              :bad_certificate,
+              :certificate_expired,
+              :certificate_revoked,
+              :certificate_unknown,
+              :unknown_ca
+            ] do
+    {:error, TLSVerificationFailed.exception(host: host)}
+  end
+
+  defp classify_tls_error(_host, reason) do
+    {:error, TLSHandshakeFailed.exception(reason: reason)}
+  end
+end
