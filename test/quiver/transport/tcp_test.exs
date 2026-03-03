@@ -3,7 +3,6 @@ defmodule Quiver.Transport.TCPTest do
 
   alias Quiver.Error.ConnectionRefused
   alias Quiver.Error.DNSResolutionFailed
-  alias Quiver.Error.InvalidTransportOpts
   alias Quiver.Error.Timeout
   alias Quiver.Test.TCPListener
   alias Quiver.Transport.TCP
@@ -31,11 +30,6 @@ defmodule Quiver.Transport.TCPTest do
     test "returns error for connect timeout" do
       assert {:error, %Timeout{}} =
                TCP.connect("240.0.0.1", 80, connect_timeout: 100)
-    end
-
-    test "validates options" do
-      assert {:error, %InvalidTransportOpts{}} =
-               TCP.connect("127.0.0.1", 80, connect_timeout: -1)
     end
   end
 

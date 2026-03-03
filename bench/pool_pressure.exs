@@ -25,7 +25,8 @@ end
         protocol: :http2,
         max_connections: 1,
         checkout_timeout: 30_000,
-        transport_opts: [verify: :verify_none, cacerts: h2_server.cacerts]
+        verify: :verify_none,
+        cacerts: h2_server.cacerts
       ]
     }
   )
@@ -38,7 +39,8 @@ end
         protocol: :http2,
         max_connections: 5,
         checkout_timeout: 30_000,
-        transport_opts: [verify: :verify_none, cacerts: h2_server.cacerts]
+        verify: :verify_none,
+        cacerts: h2_server.cacerts
       ]
     }
   )

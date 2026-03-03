@@ -27,6 +27,7 @@ defmodule Quiver.Conn.HTTP1.Parse do
           | {:data, binary()}
           | :done
 
+  @doc false
   @spec parse(binary(), parse_state()) ::
           {[response_fragment()], parse_state(), binary()}
           | {:error, term()}

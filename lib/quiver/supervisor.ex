@@ -19,29 +19,50 @@ defmodule Quiver.Supervisor.Cleanup do
 end
 
 defmodule Quiver.Supervisor do
-  @moduledoc """
-  Named supervision tree for a Quiver HTTP client instance.
-
-  Starts a Registry for pool lookup and a DynamicSupervisor for pool processes.
-  Pool config rules are parsed eagerly and stored in `:persistent_term`.
-
-  The `name` option must be a compile-time atom. Dynamic atom creation
-  from user input will exhaust the atom table.
-
-  ## Usage
-
-      children = [
-        {Quiver.Supervisor, name: :my_client, pools: %{:default => [size: 5]}}
-      ]
-
-  """
-
   use Supervisor
 
   alias Quiver.Config
 
+  @moduledoc """
+  Named supervision tree for a Quiver HTTP client instance.
+
+  Starts a Registry for pool lookup and a DynamicSupervisor for pool processes.
+  Pool config rules are parsed eagerly via `Quiver.Config.validate_pool/1` and
+  stored in `:persistent_term`. All configuration is validated once at startup;
+  downstream pools and transports trust the pre-validated config.
+
+  ## Options
+
+    * `:name` (required) - Atom identifying this instance. Must be a compile-time
+      atom; dynamic atom creation from user input will exhaust the atom table.
+
+    * `:pools` - Map of origin patterns to pool configuration. Keys are URI
+      strings, wildcard patterns (`"https://*.example.com"`), or `:default`.
+      Rules are matched by specificity: exact > wildcard > default.
+
+  ## Pool Configuration
+
+  #{Zoi.describe(Config.schema())}
+
+  ## Examples
+
+      children = [
+        {Quiver.Supervisor,
+         name: :my_client,
+         pools: %{
+           :default => [size: 5],
+           "https://api.example.com" => [size: 25, protocol: :http2],
+           "https://*.cdn.example.com" => [size: 50, connect_timeout: 10_000]
+         }}
+      ]
+
+  """
+
   @doc "Starts a named Quiver instance with the given pool configuration."
-  @spec start_link(keyword()) :: Supervisor.on_start()
+  @spec start_link([
+          {:name, atom()} | {:pools, %{optional(binary() | :default) => Config.pool_opts()}}
+        ]) ::
+          Supervisor.on_start()
   def start_link(opts) do
     name = Keyword.fetch!(opts, :name)
     Supervisor.start_link(__MODULE__, opts, name: name)

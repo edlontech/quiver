@@ -17,10 +17,8 @@ defmodule Quiver.Conn.HTTP2Test do
 
       assert {:ok, %Conn{state: :open}} =
                Conn.connect(uri,
-                 transport_opts: [
-                   verify: :verify_none,
-                   cacerts: cacerts
-                 ]
+                 verify: :verify_none,
+                 cacerts: cacerts
                )
 
       TestServer.stop(server)
@@ -41,7 +39,7 @@ defmodule Quiver.Conn.HTTP2Test do
     test "returns error when server is unreachable" do
       uri = %URI{scheme: "https", host: "127.0.0.1", port: 1}
 
-      assert {:error, _} = Conn.connect(uri, transport_opts: [verify: :verify_none])
+      assert {:error, _} = Conn.connect(uri, verify: :verify_none)
     end
   end
 
@@ -566,10 +564,8 @@ defmodule Quiver.Conn.HTTP2Test do
 
     {:ok, conn} =
       Conn.connect(uri,
-        transport_opts: [
-          verify: :verify_none,
-          cacerts: cacerts
-        ]
+        verify: :verify_none,
+        cacerts: cacerts
       )
 
     {:ok, conn, server}

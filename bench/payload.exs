@@ -26,7 +26,8 @@ end
       default: [
         protocol: :http2,
         max_connections: 3,
-        transport_opts: [verify: :verify_none, cacerts: h2_server.cacerts]
+        verify: :verify_none,
+        cacerts: h2_server.cacerts
       ]
     }
   )

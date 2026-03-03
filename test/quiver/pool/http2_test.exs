@@ -15,7 +15,7 @@ defmodule Quiver.Pool.HTTP2Test do
       {:ok, pid} =
         Pool.start_link(
           origin: {:https, "127.0.0.1", port},
-          pool_opts: [transport_opts: [verify: :verify_none, cacerts: cacerts]]
+          pool_opts: [verify: :verify_none, cacerts: cacerts]
         )
 
       assert {:ok, response} = Pool.request(pid, :get, "/", [], nil, recv_timeout: 5_000)
@@ -36,7 +36,8 @@ defmodule Quiver.Pool.HTTP2Test do
           origin: {:https, "127.0.0.1", port},
           pool_opts: [
             max_connections: 1,
-            transport_opts: [verify: :verify_none, cacerts: cacerts]
+            verify: :verify_none,
+            cacerts: cacerts
           ]
         )
 
@@ -68,7 +69,8 @@ defmodule Quiver.Pool.HTTP2Test do
           origin: {:https, "127.0.0.1", port},
           pool_opts: [
             max_connections: 3,
-            transport_opts: [verify: :verify_none, cacerts: cacerts]
+            verify: :verify_none,
+            cacerts: cacerts
           ]
         )
 
@@ -89,7 +91,7 @@ defmodule Quiver.Pool.HTTP2Test do
       {:ok, pid} =
         Pool.start_link(
           origin: {:https, "127.0.0.1", port},
-          pool_opts: [transport_opts: [verify: :verify_none, cacerts: cacerts]]
+          pool_opts: [verify: :verify_none, cacerts: cacerts]
         )
 
       stats = Pool.stats(pid)

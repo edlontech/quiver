@@ -9,6 +9,7 @@ defmodule Quiver.MixProject do
       version: "0.1.0",
       elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
+      docs: docs(),
       dialyzer: [
         plt_core_path: "_plts/core"
       ],
@@ -29,6 +30,77 @@ defmodule Quiver.MixProject do
   def application do
     [
       extra_applications: [:logger]
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      source_url: "https://github.com/edlontech/quiver",
+      extras: [
+        {"README.md", title: "Overview"},
+        {"guides/getting-started.md", title: "Getting Started"},
+        {"guides/architecture.md", title: "Architecture"},
+        {"guides/error-handling.md", title: "Error Handling"},
+        {"guides/telemetry.md", title: "Telemetry"},
+        {"CHANGELOG.md", title: "Changelog"},
+        {"LICENSE", title: "License"}
+      ],
+      groups_for_extras: [
+        Guides: [
+          "guides/getting-started.md",
+          "guides/architecture.md",
+          "guides/error-handling.md",
+          "guides/telemetry.md"
+        ],
+        About: [
+          "CHANGELOG.md",
+          "LICENSE"
+        ]
+      ],
+      groups_for_modules: [
+        "Client API": [
+          Quiver,
+          Quiver.Request,
+          Quiver.Response,
+          Quiver.StreamResponse
+        ],
+        Configuration: [
+          Quiver.Supervisor,
+          Quiver.Config,
+          Quiver.Config.Rule
+        ],
+        Telemetry: [
+          Quiver.Telemetry
+        ],
+        Errors: [
+          Quiver.Error,
+          ~r/Quiver\.Error\./
+        ],
+        Pools: [
+          Quiver.Pool,
+          Quiver.Pool.Manager,
+          Quiver.Pool.HTTP1,
+          Quiver.Pool.HTTP2,
+          Quiver.Pool.HTTP2.Connection
+        ],
+        Connections: [
+          Quiver.Conn,
+          Quiver.Conn.HTTP1,
+          Quiver.Conn.HTTP2,
+          ~r/Quiver\.Conn\.HTTP[12]\./
+        ],
+        Transports: [
+          Quiver.Transport,
+          Quiver.Transport.SSL,
+          Quiver.Transport.TCP
+        ]
+      ],
+      nest_modules_by_prefix: [
+        Quiver.Error,
+        Quiver.Conn,
+        Quiver.Pool
+      ]
     ]
   end
 

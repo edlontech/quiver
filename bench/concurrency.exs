@@ -21,7 +21,8 @@ handler = fn conn -> Plug.Conn.send_resp(conn, 200, ~s({"ok":true})) end
       default: [
         protocol: :http2,
         max_connections: 5,
-        transport_opts: [verify: :verify_none, cacerts: h2_server.cacerts]
+        verify: :verify_none,
+        cacerts: h2_server.cacerts
       ]
     }
   )

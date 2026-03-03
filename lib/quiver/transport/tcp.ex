@@ -7,7 +7,6 @@ defmodule Quiver.Transport.TCP do
 
   use TypedStruct
 
-  alias Quiver.Config
   alias Quiver.Error.ConnectionClosed
   alias Quiver.Error.ConnectionFailed
   alias Quiver.Error.ConnectionRefused
@@ -20,36 +19,34 @@ defmodule Quiver.Transport.TCP do
 
   @impl true
   def connect(host, port, opts) do
-    with {:ok, validated} <- Config.validate_tcp(opts) do
-      tcp_opts = [
-        :binary,
-        active: false,
-        packet: :raw,
-        buffer: validated[:buffer_size]
-      ]
+    tcp_opts = [
+      :binary,
+      active: false,
+      packet: :raw,
+      buffer: Keyword.get(opts, :buffer_size, 8_192)
+    ]
 
-      host_charlist = to_charlist(host)
-      timeout = validated[:connect_timeout]
+    host_charlist = to_charlist(host)
+    timeout = Keyword.get(opts, :connect_timeout, 5_000)
 
-      case :gen_tcp.connect(host_charlist, port, tcp_opts, timeout) do
-        {:ok, socket} ->
-          {:ok, %__MODULE__{socket: socket}}
+    case :gen_tcp.connect(host_charlist, port, tcp_opts, timeout) do
+      {:ok, socket} ->
+        {:ok, %__MODULE__{socket: socket}}
 
-        {:error, :econnrefused} ->
-          {:error, ConnectionRefused.exception(message: "connection refused to #{host}:#{port}")}
+      {:error, :econnrefused} ->
+        {:error, ConnectionRefused.exception(message: "connection refused to #{host}:#{port}")}
 
-        {:error, :nxdomain} ->
-          {:error, DNSResolutionFailed.exception(host: host)}
+      {:error, :nxdomain} ->
+        {:error, DNSResolutionFailed.exception(host: host)}
 
-        {:error, :timeout} ->
-          {:error, Timeout.exception(message: "connect timeout to #{host}:#{port}")}
+      {:error, :timeout} ->
+        {:error, Timeout.exception(message: "connect timeout to #{host}:#{port}")}
 
-        {:error, reason} ->
-          {:error,
-           ConnectionFailed.exception(
-             message: "failed to connect to #{host}:#{port}: #{inspect(reason)}"
-           )}
-      end
+      {:error, reason} ->
+        {:error,
+         ConnectionFailed.exception(
+           message: "failed to connect to #{host}:#{port}: #{inspect(reason)}"
+         )}
     end
   end
 

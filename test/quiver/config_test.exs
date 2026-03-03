@@ -5,78 +5,6 @@ defmodule Quiver.ConfigTest do
   alias Quiver.Config.Rule
   alias Quiver.Error.InvalidPoolOpts
   alias Quiver.Error.InvalidPoolRule
-  alias Quiver.Error.InvalidTransportOpts
-
-  describe "validate_tcp/1" do
-    test "returns defaults when given empty list" do
-      assert {:ok, opts} = Config.validate_tcp([])
-      assert opts[:connect_timeout] == 5_000
-      assert opts[:recv_timeout] == 15_000
-      assert opts[:buffer_size] == 8_192
-    end
-
-    test "accepts valid options" do
-      assert {:ok, opts} =
-               Config.validate_tcp(
-                 connect_timeout: 10_000,
-                 recv_timeout: 30_000,
-                 buffer_size: 16_384
-               )
-
-      assert opts[:connect_timeout] == 10_000
-      assert opts[:recv_timeout] == 30_000
-      assert opts[:buffer_size] == 16_384
-    end
-
-    test "rejects non-positive connect_timeout" do
-      assert {:error, %InvalidTransportOpts{}} = Config.validate_tcp(connect_timeout: 0)
-    end
-
-    test "rejects non-integer connect_timeout" do
-      assert {:error, %InvalidTransportOpts{}} = Config.validate_tcp(connect_timeout: "fast")
-    end
-
-    test "rejects non-positive recv_timeout" do
-      assert {:error, %InvalidTransportOpts{}} = Config.validate_tcp(recv_timeout: -1)
-    end
-
-    test "rejects non-positive buffer_size" do
-      assert {:error, %InvalidTransportOpts{}} = Config.validate_tcp(buffer_size: 0)
-    end
-  end
-
-  describe "validate_ssl/1" do
-    test "returns defaults when given empty list" do
-      assert {:ok, opts} = Config.validate_ssl([])
-      assert opts[:connect_timeout] == 5_000
-      assert opts[:recv_timeout] == 15_000
-      assert opts[:verify] == :verify_peer
-      assert opts[:cacerts] == :default
-    end
-
-    test "accepts verify: :verify_none" do
-      assert {:ok, opts} = Config.validate_ssl(verify: :verify_none)
-      assert opts[:verify] == :verify_none
-    end
-
-    test "accepts verify: :verify_peer" do
-      assert {:ok, opts} = Config.validate_ssl(verify: :verify_peer)
-      assert opts[:verify] == :verify_peer
-    end
-
-    test "rejects invalid verify value" do
-      assert {:error, %InvalidTransportOpts{}} = Config.validate_ssl(verify: :yolo)
-    end
-
-    test "accepts cacerts: :default" do
-      assert {:ok, opts} = Config.validate_ssl(cacerts: :default)
-      assert opts[:cacerts] == :default
-    end
-
-    test "inherits TCP validation rules" do
-      assert {:error, %InvalidTransportOpts{}} = Config.validate_ssl(connect_timeout: -1)
-    end
-  end
 
   describe "validate_pool/1" do
     test "returns defaults when given empty list" do
@@ -85,7 +13,12 @@ defmodule Quiver.ConfigTest do
       assert validated[:checkout_timeout] == 5_000
       assert validated[:idle_timeout] == 30_000
       assert validated[:ping_interval] == 5_000
-      assert validated[:transport_opts] == []
+      assert validated[:connect_timeout] == 5_000
+      assert validated[:recv_timeout] == 15_000
+      assert validated[:buffer_size] == 8_192
+      assert validated[:verify] == :verify_peer
+      assert validated[:cacerts] == :default
+      assert validated[:alpn_advertised_protocols] == []
     end
 
     test "accepts valid overrides" do
@@ -142,6 +75,54 @@ defmodule Quiver.ConfigTest do
 
     test "rejects non-positive max_connections" do
       assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(max_connections: 0)
+    end
+
+    test "accepts valid transport options" do
+      assert {:ok, opts} =
+               Config.validate_pool(
+                 connect_timeout: 10_000,
+                 recv_timeout: 30_000,
+                 buffer_size: 16_384
+               )
+
+      assert opts[:connect_timeout] == 10_000
+      assert opts[:recv_timeout] == 30_000
+      assert opts[:buffer_size] == 16_384
+    end
+
+    test "rejects non-positive connect_timeout" do
+      assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(connect_timeout: 0)
+    end
+
+    test "rejects non-integer connect_timeout" do
+      assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(connect_timeout: "fast")
+    end
+
+    test "rejects non-positive recv_timeout" do
+      assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(recv_timeout: -1)
+    end
+
+    test "rejects non-positive buffer_size" do
+      assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(buffer_size: 0)
+    end
+
+    test "accepts verify: :verify_none" do
+      assert {:ok, opts} = Config.validate_pool(verify: :verify_none)
+      assert opts[:verify] == :verify_none
+    end
+
+    test "accepts verify: :verify_peer" do
+      assert {:ok, opts} = Config.validate_pool(verify: :verify_peer)
+      assert opts[:verify] == :verify_peer
+    end
+
+    test "rejects invalid verify value" do
+      assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(verify: :yolo)
+    end
+
+    test "accepts cacerts: :default" do
+      assert {:ok, opts} = Config.validate_pool(cacerts: :default)
+      assert opts[:cacerts] == :default
     end
   end
 

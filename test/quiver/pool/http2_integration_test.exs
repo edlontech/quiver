@@ -23,7 +23,7 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
         {Quiver.Supervisor,
          name: name,
          pools: %{
-           default: [protocol: :http2, transport_opts: [verify: :verify_none, cacerts: cacerts]]
+           default: [protocol: :http2, verify: :verify_none, cacerts: cacerts]
          }}
       )
 
@@ -45,7 +45,7 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
         {Quiver.Supervisor,
          name: name,
          pools: %{
-           default: [protocol: :http2, transport_opts: [verify: :verify_none, cacerts: cacerts]]
+           default: [protocol: :http2, verify: :verify_none, cacerts: cacerts]
          }}
       )
 
@@ -71,7 +71,8 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
           origin: {:https, "127.0.0.1", port},
           pool_opts: [
             max_connections: 1,
-            transport_opts: [verify: :verify_none, cacerts: cacerts]
+            verify: :verify_none,
+            cacerts: cacerts
           ]
         )
 
@@ -101,7 +102,7 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
       {:ok, pid} =
         Pool.start_link(
           origin: {:https, "127.0.0.1", port},
-          pool_opts: [transport_opts: [verify: :verify_none, cacerts: cacerts]]
+          pool_opts: [verify: :verify_none, cacerts: cacerts]
         )
 
       assert {:ok, %StreamResponse{status: 200, headers: headers, body: body}} =
@@ -123,7 +124,8 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
           origin: {:https, "127.0.0.1", port},
           pool_opts: [
             max_connections: 1,
-            transport_opts: [verify: :verify_none, cacerts: cacerts]
+            verify: :verify_none,
+            cacerts: cacerts
           ]
         )
 
@@ -153,14 +155,14 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
       {:ok, pid} =
         Pool.start_link(
           origin: {:https, "127.0.0.1", port},
-          pool_opts: [transport_opts: [verify: :verify_none, cacerts: cacerts]]
+          pool_opts: [verify: :verify_none, cacerts: cacerts]
         )
 
       {:ok, %StreamResponse{body: body}} =
         Pool.stream_request(pid, :get, "/", [], nil, recv_timeout: 5_000)
 
       chunks = Enum.take(body, 1)
-      assert length(chunks) >= 1
+      assert chunks != []
 
       assert_eventually(Pool.stats(pid).active == 0)
 
@@ -178,7 +180,8 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
           origin: {:https, "127.0.0.1", port},
           pool_opts: [
             max_connections: 2,
-            transport_opts: [verify: :verify_none, cacerts: cacerts]
+            verify: :verify_none,
+            cacerts: cacerts
           ]
         )
 

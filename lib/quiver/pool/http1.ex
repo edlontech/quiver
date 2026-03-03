@@ -10,7 +10,6 @@ defmodule Quiver.Pool.HTTP1 do
   @behaviour NimblePool
   @behaviour Quiver.Pool
 
-  alias Quiver.Config
   alias Quiver.Conn.HTTP1
   alias Quiver.Error.CheckoutTimeout
   alias Quiver.Error.StreamError
@@ -18,6 +17,12 @@ defmodule Quiver.Pool.HTTP1 do
   alias Quiver.Telemetry
 
   defstruct [:origin, :config, :stats_table]
+
+  @type t :: %__MODULE__{
+          origin: origin() | nil,
+          config: map() | nil,
+          stats_table: :ets.table() | nil
+        }
 
   @type origin :: {:http | :https, String.t(), :inet.port_number()}
 
@@ -35,23 +40,17 @@ defmodule Quiver.Pool.HTTP1 do
     {origin, opts} = Keyword.pop!(opts, :origin)
     {pool_opts, nimble_opts} = Keyword.pop(opts, :pool_opts, [])
 
-    case Config.validate_pool(pool_opts) do
-      {:ok, config} ->
-        init_arg = %__MODULE__{origin: origin, config: config}
+    init_arg = %__MODULE__{origin: origin, config: pool_opts}
 
-        nimble_opts =
-          Keyword.merge(nimble_opts,
-            worker: {__MODULE__, init_arg},
-            pool_size: config[:size],
-            lazy: true,
-            worker_idle_timeout: config[:ping_interval]
-          )
+    nimble_opts =
+      Keyword.merge(nimble_opts,
+        worker: {__MODULE__, init_arg},
+        pool_size: Keyword.get(pool_opts, :size, 10),
+        lazy: true,
+        worker_idle_timeout: Keyword.get(pool_opts, :ping_interval, 5_000)
+      )
 
-        NimblePool.start_link(nimble_opts)
-
-      {:error, _} = error ->
-        error
-    end
+    NimblePool.start_link(nimble_opts)
   end
 
   @impl Quiver.Pool
@@ -110,7 +109,7 @@ defmodule Quiver.Pool.HTTP1 do
     :persistent_term.put({__MODULE__, self()}, %{
       stats_table: table,
       origin: state.origin,
-      checkout_timeout: state.config[:checkout_timeout]
+      checkout_timeout: Keyword.get(state.config, :checkout_timeout, 5_000)
     })
 
     {:ok, %{state | stats_table: table}}
@@ -125,7 +124,7 @@ defmodule Quiver.Pool.HTTP1 do
   def handle_checkout(:checkout, _from, :not_connected, state) do
     update_stat(state, :queued, -1)
     update_stat(state, :active, 1)
-    {:ok, {:fresh, state.origin, state.config[:transport_opts]}, :not_connected, state}
+    {:ok, {:fresh, state.origin, state.config}, :not_connected, state}
   end
 
   def handle_checkout(:checkout, _from, {conn, _last_used_at}, state) do
@@ -159,7 +158,7 @@ defmodule Quiver.Pool.HTTP1 do
     elapsed = System.monotonic_time(:millisecond) - last_used_at
 
     cond do
-      elapsed >= state.config[:idle_timeout] ->
+      elapsed >= Keyword.get(state.config, :idle_timeout, 30_000) ->
         update_stat(state, :idle, -1)
         emit_conn_close(state.origin, :idle_timeout)
         {:remove, :idle_timeout}
@@ -218,8 +217,7 @@ defmodule Quiver.Pool.HTTP1 do
   # -- Private --
 
   defp do_checkout(pool, method, path, headers, body, timeout) do
-    %{origin: {scheme, host, port}} = :persistent_term.get({__MODULE__, pool})
-    origin = "#{scheme}://#{host}:#{port}"
+    origin = pool_origin(pool)
 
     checkout_fn = fn _from, client ->
       case connect_and_request(client, method, path, headers, body) do
@@ -233,8 +231,7 @@ defmodule Quiver.Pool.HTTP1 do
   end
 
   defp do_stream_checkout(pool, method, path, headers, body, timeout) do
-    %{origin: {scheme, host, port}} = :persistent_term.get({__MODULE__, pool})
-    origin = "#{scheme}://#{host}:#{port}"
+    origin = pool_origin(pool)
     caller = self()
     ref = make_ref()
 
@@ -329,13 +326,13 @@ defmodule Quiver.Pool.HTTP1 do
   end
 
   defp connect_and_request(
-         {:fresh, {_scheme, _host, _port} = origin, transport_opts},
+         {:fresh, {_scheme, _host, _port} = origin, config},
          method,
          path,
          headers,
          body
        ) do
-    case instrumented_connect(origin, transport_opts) do
+    case instrumented_connect(origin, config) do
       {:ok, conn} -> HTTP1.request(conn, method, path, headers, body)
       {:error, reason} -> {:error, reason}
     end
@@ -345,8 +342,8 @@ defmodule Quiver.Pool.HTTP1 do
     HTTP1.request(conn, method, path, headers, body)
   end
 
-  defp open_and_recv_headers({:fresh, origin, transport_opts}, method, path, headers, body) do
-    case instrumented_connect(origin, transport_opts) do
+  defp open_and_recv_headers({:fresh, origin, config}, method, path, headers, body) do
+    case instrumented_connect(origin, config) do
       {:ok, conn} -> do_open_and_recv(conn, method, path, headers, body)
       {:error, reason} -> {:error, reason}
     end
@@ -388,14 +385,14 @@ defmodule Quiver.Pool.HTTP1 do
     )
   end
 
-  defp instrumented_connect({scheme, host, port} = origin, transport_opts) do
+  defp instrumented_connect({scheme, host, port} = origin, config) do
     uri = %URI{scheme: to_string(scheme), host: host, port: port}
     start_time = System.monotonic_time()
     conn_meta = %{origin: origin, scheme: scheme}
 
     Telemetry.event([:quiver, :conn, :start], %{system_time: System.system_time()}, conn_meta)
 
-    case HTTP1.connect(uri, transport_opts) do
+    case HTTP1.connect(uri, config) do
       {:ok, conn} ->
         duration = System.monotonic_time() - start_time
         Telemetry.event([:quiver, :conn, :stop], %{duration: duration}, conn_meta)
@@ -431,9 +428,18 @@ defmodule Quiver.Pool.HTTP1 do
     val
   end
 
+  defp pool_origin(pool) do
+    case :persistent_term.get({__MODULE__, pool}, nil) do
+      %{origin: {scheme, host, port}} -> "#{scheme}://#{host}:#{port}"
+      nil -> "unknown"
+    end
+  end
+
   defp default_timeout(pool) do
-    %{checkout_timeout: timeout} = :persistent_term.get({__MODULE__, pool})
-    timeout
+    case :persistent_term.get({__MODULE__, pool}, nil) do
+      %{checkout_timeout: timeout} -> timeout
+      nil -> 5_000
+    end
   end
 
   defp get_stats_table(pool) do

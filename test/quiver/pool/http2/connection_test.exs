@@ -16,7 +16,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       {:ok, pid} =
         Connection.start_link(
           origin: {:https, "127.0.0.1", port},
-          transport_opts: [verify: :verify_none, cacerts: cacerts]
+          config: [verify: :verify_none, cacerts: cacerts]
         )
 
       assert Connection.open?(pid)
@@ -29,7 +29,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       {:ok, pid} =
         Connection.start_link(
           origin: {:https, "127.0.0.1", port},
-          transport_opts: [verify: :verify_none, cacerts: cacerts]
+          config: [verify: :verify_none, cacerts: cacerts]
         )
 
       assert :ok = Connection.close(pid)
@@ -45,7 +45,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       {:ok, pid} =
         Connection.start_link(
           origin: {:https, "127.0.0.1", port},
-          transport_opts: [verify: :verify_none, cacerts: cacerts]
+          config: [verify: :verify_none, cacerts: cacerts]
         )
 
       assert {:ok, response} = Connection.request(pid, :get, "/", [], nil, recv_timeout: 5_000)
@@ -63,7 +63,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       {:ok, pid} =
         Connection.start_link(
           origin: {:https, "127.0.0.1", port},
-          transport_opts: [verify: :verify_none, cacerts: cacerts]
+          config: [verify: :verify_none, cacerts: cacerts]
         )
 
       assert {:ok, response} =
@@ -85,7 +85,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       {:ok, pid} =
         Connection.start_link(
           origin: {:https, "127.0.0.1", port},
-          transport_opts: [verify: :verify_none, cacerts: cacerts]
+          config: [verify: :verify_none, cacerts: cacerts]
         )
 
       tasks =
@@ -110,7 +110,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       {:ok, pid} =
         Connection.start_link(
           origin: {:https, "127.0.0.1", port},
-          transport_opts: [verify: :verify_none, cacerts: cacerts]
+          config: [verify: :verify_none, cacerts: cacerts]
         )
 
       assert Connection.open?(pid)
@@ -133,7 +133,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       {:ok, pid} =
         Connection.start_link(
           origin: {:https, "127.0.0.1", port},
-          transport_opts: [verify: :verify_none, cacerts: cacerts]
+          config: [verify: :verify_none, cacerts: cacerts]
         )
 
       task =
@@ -162,7 +162,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       {:ok, pid} =
         Connection.start_link(
           origin: {:https, "127.0.0.1", port},
-          transport_opts: [verify: :verify_none, cacerts: cacerts]
+          config: [verify: :verify_none, cacerts: cacerts]
         )
 
       assert {:error, :recv_timeout} =
@@ -178,7 +178,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       {:ok, worker} =
         Connection.start_link(
           origin: {:https, "127.0.0.1", port},
-          transport_opts: [verify: :verify_none, cacerts: cacerts]
+          config: [verify: :verify_none, cacerts: cacerts]
         )
 
       tag = make_ref()
@@ -198,7 +198,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       {:ok, worker} =
         Connection.start_link(
           origin: {:https, "127.0.0.1", port},
-          transport_opts: [verify: :verify_none, cacerts: cacerts]
+          config: [verify: :verify_none, cacerts: cacerts]
         )
 
       tag = make_ref()
@@ -218,7 +218,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       {:ok, worker} =
         Connection.start_link(
           origin: {:https, "127.0.0.1", port},
-          transport_opts: [verify: :verify_none, cacerts: cacerts]
+          config: [verify: :verify_none, cacerts: cacerts]
         )
 
       tag = make_ref()

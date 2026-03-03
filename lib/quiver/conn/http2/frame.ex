@@ -43,6 +43,7 @@ defmodule Quiver.Conn.HTTP2.Frame do
 
   # -- Decode --
 
+  @doc false
   @spec decode(binary()) :: {:ok, tuple(), binary()} | :more | {:error, term()}
   def decode(
         <<length::24, type::8, flags::8, _reserved::1, stream_id::31,
@@ -178,12 +179,14 @@ defmodule Quiver.Conn.HTTP2.Frame do
 
   # -- Encode --
 
+  @doc false
   @spec encode_data(non_neg_integer(), iodata(), boolean()) :: iodata()
   def encode_data(stream_id, payload, end_stream?) do
     flags = if end_stream?, do: @flag_end_stream, else: 0
     encode_frame(@data, flags, stream_id, payload)
   end
 
+  @doc false
   @spec encode_headers(non_neg_integer(), iodata(), boolean(), boolean()) :: iodata()
   def encode_headers(stream_id, header_block, end_headers?, end_stream?) do
     flags = 0
@@ -192,43 +195,51 @@ defmodule Quiver.Conn.HTTP2.Frame do
     encode_frame(@headers, flags, stream_id, header_block)
   end
 
+  @doc false
   @spec encode_settings([{non_neg_integer(), non_neg_integer()}]) :: iodata()
   def encode_settings(settings) do
     payload = Enum.map(settings, fn {id, value} -> <<id::16, value::32>> end)
     encode_frame(@settings, 0, 0, payload)
   end
 
+  @doc false
   @spec encode_settings_ack() :: iodata()
   def encode_settings_ack do
     encode_frame(@settings, @flag_ack, 0, [])
   end
 
+  @doc false
   @spec encode_window_update(non_neg_integer(), non_neg_integer()) :: iodata()
   def encode_window_update(stream_id, increment) do
     encode_frame(@window_update, 0, stream_id, <<0::1, increment::31>>)
   end
 
+  @doc false
   @spec encode_ping(binary()) :: iodata()
   def encode_ping(opaque_data) when byte_size(opaque_data) == 8 do
     encode_frame(@ping, 0, 0, opaque_data)
   end
 
+  @doc false
   @spec encode_pong(binary()) :: iodata()
   def encode_pong(opaque_data) when byte_size(opaque_data) == 8 do
     encode_frame(@ping, @flag_ack, 0, opaque_data)
   end
 
+  @doc false
   @spec encode_goaway(non_neg_integer(), non_neg_integer(), binary()) :: iodata()
   def encode_goaway(last_stream_id, error_code, debug_data) do
     payload = [<<0::1, last_stream_id::31, error_code::32>>, debug_data]
     encode_frame(@goaway, 0, 0, payload)
   end
 
+  @doc false
   @spec encode_rst_stream(non_neg_integer(), non_neg_integer()) :: iodata()
   def encode_rst_stream(stream_id, error_code) do
     encode_frame(@rst_stream, 0, stream_id, <<error_code::32>>)
   end
 
+  @doc false
   @spec encode_continuation(non_neg_integer(), iodata(), boolean()) :: iodata()
   def encode_continuation(stream_id, header_block, end_headers?) do
     flags = if end_headers?, do: @flag_end_headers, else: 0
@@ -238,6 +249,7 @@ defmodule Quiver.Conn.HTTP2.Frame do
   # -- Helpers --
 
   @doc false
+  @spec flag_set?(non_neg_integer(), non_neg_integer()) :: boolean()
   def flag_set?(flags, flag), do: (flags &&& flag) == flag
 
   defp encode_frame(type, flags, stream_id, payload) do
@@ -298,6 +310,7 @@ defmodule Quiver.Conn.HTTP2.Frame do
   defp settings_id_to_atom(id), do: {:unknown, id}
 
   @doc false
+  @spec settings_atom_to_id(atom()) :: non_neg_integer()
   def settings_atom_to_id(:header_table_size), do: @settings_header_table_size
   def settings_atom_to_id(:enable_push), do: @settings_enable_push
   def settings_atom_to_id(:max_concurrent_streams), do: @settings_max_concurrent_streams

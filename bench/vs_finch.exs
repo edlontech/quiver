@@ -13,7 +13,7 @@ end
 {:ok, h1_server} = BenchServer.start_http1(handler)
 {:ok, h2_server} = BenchServer.start_http2(handler)
 
-h2_conn_opts = [transport_opts: [verify: :verify_none, cacerts: h2_server.cacerts]]
+h2_tls_opts = [verify: :verify_none, cacerts: h2_server.cacerts]
 
 # -- HTTP/1 pools (30 connections each) --
 
@@ -42,11 +42,7 @@ Finch.start_link(
   Quiver.Supervisor.start_link(
     name: :bench_vs_h2,
     pools: %{
-      default: [
-        protocol: :http2,
-        max_connections: 10,
-        transport_opts: h2_conn_opts[:transport_opts]
-      ]
+      default: [protocol: :http2, max_connections: 10] ++ h2_tls_opts
     }
   )
 
@@ -58,7 +54,7 @@ Finch.start_link(
     "https://127.0.0.1:#{h2_server.port}" => [
       protocols: [:http2],
       count: 10,
-      conn_opts: h2_conn_opts
+      conn_opts: [transport_opts: h2_tls_opts]
     ]
   }
 )

@@ -19,34 +19,83 @@ defmodule Quiver.Config do
   alias Quiver.Config.Rule
   alias Quiver.Error.InvalidPoolOpts
   alias Quiver.Error.InvalidPoolRule
-  alias Quiver.Error.InvalidTransportOpts
 
-  # -- Transport --
+  @schema Zoi.keyword(
+            size:
+              Zoi.integer(description: "Number of connections in the pool.")
+              |> Zoi.gte(1)
+              |> Zoi.optional()
+              |> Zoi.default(10),
+            checkout_timeout:
+              Zoi.integer(description: "Max wait time in ms to acquire a connection.")
+              |> Zoi.gte(1)
+              |> Zoi.optional()
+              |> Zoi.default(5_000),
+            idle_timeout:
+              Zoi.integer(description: "Time in ms before idle connections are closed.")
+              |> Zoi.gte(1)
+              |> Zoi.optional()
+              |> Zoi.default(30_000),
+            ping_interval:
+              Zoi.integer(description: "Interval in ms to check connection health.")
+              |> Zoi.gte(1)
+              |> Zoi.optional()
+              |> Zoi.default(5_000),
+            protocol:
+              Zoi.enum([:http1, :http2], description: "HTTP protocol version to use.")
+              |> Zoi.optional()
+              |> Zoi.default(:http1),
+            max_connections:
+              Zoi.integer(description: "Max HTTP/2 connections per origin.")
+              |> Zoi.gte(1)
+              |> Zoi.optional()
+              |> Zoi.default(5),
+            connect_timeout:
+              Zoi.integer(description: "TCP/TLS connect timeout in ms.")
+              |> Zoi.gte(1)
+              |> Zoi.optional()
+              |> Zoi.default(5_000),
+            recv_timeout:
+              Zoi.integer(description: "Socket receive timeout in ms.")
+              |> Zoi.gte(1)
+              |> Zoi.optional()
+              |> Zoi.default(15_000),
+            buffer_size:
+              Zoi.integer(description: "Socket receive buffer size in bytes.")
+              |> Zoi.gte(1)
+              |> Zoi.optional()
+              |> Zoi.default(8_192),
+            verify:
+              Zoi.enum([:verify_peer, :verify_none],
+                description: "TLS certificate verification mode."
+              )
+              |> Zoi.optional()
+              |> Zoi.default(:verify_peer),
+            cacerts:
+              Zoi.union([Zoi.literal(:default), Zoi.array(Zoi.any())],
+                description: "CA certificates. :default uses OS store."
+              )
+              |> Zoi.optional()
+              |> Zoi.default(:default),
+            alpn_advertised_protocols:
+              Zoi.array(Zoi.string(), description: "ALPN protocols to advertise during TLS.")
+              |> Zoi.optional()
+              |> Zoi.default([])
+          )
 
-  @doc "Validates TCP transport options, applying defaults."
-  @spec validate_tcp(keyword()) :: {:ok, keyword()} | {:error, InvalidTransportOpts.t()}
-  def validate_tcp(opts) do
-    case Zoi.parse(tcp_schema(), opts) do
-      {:ok, validated} -> {:ok, validated}
-      {:error, errors} -> {:error, to_transport_error(errors)}
-    end
-  end
+  @doc false
+  def schema, do: @schema
 
-  @doc "Validates SSL transport options, applying defaults."
-  @spec validate_ssl(keyword()) :: {:ok, keyword()} | {:error, InvalidTransportOpts.t()}
-  def validate_ssl(opts) do
-    case Zoi.parse(ssl_schema(), opts) do
-      {:ok, validated} -> {:ok, validated}
-      {:error, errors} -> {:error, to_transport_error(errors)}
-    end
-  end
+  @type pool_opts :: unquote(Zoi.type_spec(@schema))
 
-  # -- Pool --
+  @doc """
+  Validates pool and transport options against the unified schema, applying defaults.
 
-  @doc "Validates pool options, applying defaults."
-  @spec validate_pool(keyword()) :: {:ok, keyword()} | {:error, InvalidPoolOpts.t()}
+  #{Zoi.describe(@schema)}
+  """
+  @spec validate_pool(pool_opts()) :: {:ok, pool_opts()} | {:error, InvalidPoolOpts.t()}
   def validate_pool(opts) do
-    case Zoi.parse(pool_schema(), opts) do
+    case Zoi.parse(@schema, opts) do
       {:ok, validated} -> {:ok, validated}
       {:error, errors} -> {:error, to_pool_error(errors)}
     end
@@ -172,49 +221,7 @@ defmodule Quiver.Config do
       tl(segments) == suffix
   end
 
-  # -- Schemas --
-
-  defp tcp_schema do
-    Zoi.keyword(
-      connect_timeout: Zoi.integer() |> Zoi.gte(1) |> Zoi.optional() |> Zoi.default(5_000),
-      recv_timeout: Zoi.integer() |> Zoi.gte(1) |> Zoi.optional() |> Zoi.default(15_000),
-      buffer_size: Zoi.integer() |> Zoi.gte(1) |> Zoi.optional() |> Zoi.default(8_192)
-    )
-  end
-
-  defp ssl_schema do
-    Zoi.keyword(
-      connect_timeout: Zoi.integer() |> Zoi.gte(1) |> Zoi.optional() |> Zoi.default(5_000),
-      recv_timeout: Zoi.integer() |> Zoi.gte(1) |> Zoi.optional() |> Zoi.default(15_000),
-      buffer_size: Zoi.integer() |> Zoi.gte(1) |> Zoi.optional() |> Zoi.default(8_192),
-      verify:
-        Zoi.enum([:verify_peer, :verify_none]) |> Zoi.optional() |> Zoi.default(:verify_peer),
-      cacerts:
-        Zoi.union([Zoi.literal(:default), Zoi.array(Zoi.any())])
-        |> Zoi.optional()
-        |> Zoi.default(:default),
-      alpn_advertised_protocols: Zoi.array(Zoi.string()) |> Zoi.optional() |> Zoi.default([])
-    )
-  end
-
-  defp pool_schema do
-    Zoi.keyword(
-      size: Zoi.integer() |> Zoi.gte(1) |> Zoi.optional() |> Zoi.default(10),
-      checkout_timeout: Zoi.integer() |> Zoi.gte(1) |> Zoi.optional() |> Zoi.default(5_000),
-      idle_timeout: Zoi.integer() |> Zoi.gte(1) |> Zoi.optional() |> Zoi.default(30_000),
-      ping_interval: Zoi.integer() |> Zoi.gte(1) |> Zoi.optional() |> Zoi.default(5_000),
-      transport_opts: Zoi.any() |> Zoi.optional() |> Zoi.default([]),
-      protocol: Zoi.enum([:http1, :http2]) |> Zoi.optional() |> Zoi.default(:http1),
-      max_connections: Zoi.integer() |> Zoi.gte(1) |> Zoi.optional() |> Zoi.default(5)
-    )
-  end
-
   # -- Error Helpers --
-
-  defp to_transport_error(errors) do
-    messages = Enum.map(errors, & &1.message)
-    InvalidTransportOpts.exception(errors: messages)
-  end
 
   defp to_pool_error(errors) do
     messages = Enum.map(errors, & &1.message)

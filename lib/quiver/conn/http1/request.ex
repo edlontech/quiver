@@ -3,6 +3,7 @@ defmodule Quiver.Conn.HTTP1.Request do
   HTTP/1.1 request line and header serialization.
   """
 
+  @doc false
   @spec encode(atom(), String.t(), [{String.t(), String.t()}], iodata() | nil) :: iodata()
   def encode(method, path, headers, body) do
     method_str = method |> Atom.to_string() |> String.upcase()

@@ -317,14 +317,17 @@ defmodule Quiver.Conn.HTTP1 do
         conn = %{conn | parse_state: new_state, buffer: rest}
         conn = update_keep_alive(conn, fragments)
         all = acc ++ fragments
+        maybe_extract_headers(conn, fragments, all)
+    end
+  end
 
-        if Enum.any?(fragments, &match?({:headers, _}, &1)) do
-          {status, headers, body_chunks} = split_header_info(all)
-          conn = if :done in all, do: %{conn | request_state: :idle}, else: conn
-          {:ok, conn, status, headers, body_chunks}
-        else
-          recv_headers_loop(conn, all)
-        end
+  defp maybe_extract_headers(conn, fragments, all) do
+    if Enum.any?(fragments, &match?({:headers, _}, &1)) do
+      {status, headers, body_chunks} = split_header_info(all)
+      conn = if :done in all, do: %{conn | request_state: :idle}, else: conn
+      {:ok, conn, status, headers, body_chunks}
+    else
+      recv_headers_loop(conn, all)
     end
   end
 

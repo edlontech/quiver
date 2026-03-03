@@ -17,19 +17,6 @@ defmodule Quiver.Error.InvalidScheme do
   def message(%{scheme: scheme}), do: "unsupported URI scheme: #{scheme}"
 end
 
-defmodule Quiver.Error.InvalidTransportOpts do
-  @moduledoc """
-  Transport options failed Zoi validation.
-  """
-
-  use Splode.Error, fields: [:errors], class: :invalid
-  @type t :: Splode.Error.t()
-
-  def message(%{errors: errors}) do
-    "invalid transport options: #{Enum.join(errors, ", ")}"
-  end
-end
-
 defmodule Quiver.Error.MalformedHeaders do
   @moduledoc """
   Unparseable HTTP header line.

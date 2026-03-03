@@ -15,11 +15,20 @@ defmodule Quiver.Pool.HTTP2.Connection do
   defstruct [
     :conn,
     :origin,
-    :transport_opts,
+    :config,
     :pool_pid,
     requests: %{},
     monitors: %{}
   ]
+
+  @type t :: %__MODULE__{
+          conn: Quiver.Conn.HTTP2.t() | nil,
+          origin: term(),
+          config: keyword(),
+          pool_pid: pid() | nil,
+          requests: map(),
+          monitors: map()
+        }
 
   @stream_idle_timeout 30_000
 
@@ -72,13 +81,13 @@ defmodule Quiver.Pool.HTTP2.Connection do
   @impl true
   def init(opts) do
     origin = Keyword.fetch!(opts, :origin)
-    transport_opts = Keyword.get(opts, :transport_opts, [])
+    config = Keyword.get(opts, :config, [])
     pool_pid = Keyword.get(opts, :pool_pid)
 
     {scheme, host, port} = origin
     uri = %URI{scheme: Atom.to_string(scheme), host: host, port: port}
 
-    case H2.connect(uri, transport_opts: transport_opts) do
+    case H2.connect(uri, config) do
       {:ok, conn} ->
         {:ok, transport} = conn.transport_mod.controlling_process(conn.transport, self())
         conn = put_in(conn.transport, transport)
@@ -88,7 +97,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
         data = %__MODULE__{
           conn: conn,
           origin: origin,
-          transport_opts: transport_opts,
+          config: config,
           pool_pid: pool_pid
         }
 
@@ -372,23 +381,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
         data
 
       {%{mode: :streaming} = req, requests} ->
-        cancel_idle_timer(req)
-
-        cond do
-          req.demand_pid != nil ->
-            Process.demonitor(req.monitor, [:flush])
-            send(req.demand_pid, {:done, ref})
-            if data.pool_pid, do: send(data.pool_pid, {:stream_done, self()})
-            %{data | requests: requests, monitors: Map.delete(data.monitors, req.monitor)}
-
-          :queue.is_empty(req.pending_data) ->
-            req = %{req | phase: :done_immediate, idle_timer: nil}
-            %{data | requests: Map.put(requests, ref, req)}
-
-          true ->
-            req = %{req | phase: :done_pending, idle_timer: nil}
-            %{data | requests: Map.put(requests, ref, req)}
-        end
+        finish_streaming_done(data, ref, req, requests)
 
       {%{from: from, monitor: mon, acc: acc}, requests} ->
         Process.demonitor(mon, [:flush])
@@ -443,6 +436,22 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
   defp dispatch_fragment(data, {:pong, _ref}), do: data
 
+  defp finish_streaming_done(data, ref, %{demand_pid: pid} = req, requests) when pid != nil do
+    cancel_idle_timer(req)
+    Process.demonitor(req.monitor, [:flush])
+    send(pid, {:done, ref})
+    if data.pool_pid, do: send(data.pool_pid, {:stream_done, self()})
+    %{data | requests: requests, monitors: Map.delete(data.monitors, req.monitor)}
+  end
+
+  defp finish_streaming_done(data, ref, req, requests) do
+    cancel_idle_timer(req)
+
+    phase = if :queue.is_empty(req.pending_data), do: :done_immediate, else: :done_pending
+    req = %{req | phase: phase, idle_timer: nil}
+    %{data | requests: Map.put(requests, ref, req)}
+  end
+
   defp dispatch_streaming_header_phase(data, ref, req, :status, value) do
     put_in(data.requests[ref], %{req | status: value})
   end
@@ -481,65 +490,60 @@ defmodule Quiver.Pool.HTTP2.Connection do
   defp handle_demand(ref, consumer_pid, data, current_state) do
     case Map.get(data.requests, ref) do
       %{mode: :streaming, phase: :done_immediate} = req ->
-        Process.demonitor(req.monitor, [:flush])
-        send(consumer_pid, {:done, ref})
-        if data.pool_pid, do: send(data.pool_pid, {:stream_done, self()})
-        monitors = Map.delete(data.monitors, req.monitor)
-
-        maybe_stop_draining(
-          %{data | requests: Map.delete(data.requests, ref), monitors: monitors},
-          current_state
-        )
+        demand_finish_stream(ref, consumer_pid, req, data, current_state)
 
       %{mode: :streaming, phase: :done_pending} = req ->
-        case :queue.out(req.pending_data) do
-          {{:value, chunk}, rest} ->
-            send(consumer_pid, {:chunk, ref, chunk})
-
-            if :queue.is_empty(rest) do
-              Process.demonitor(req.monitor, [:flush])
-              send(consumer_pid, {:done, ref})
-              if data.pool_pid, do: send(data.pool_pid, {:stream_done, self()})
-              monitors = Map.delete(data.monitors, req.monitor)
-
-              maybe_stop_draining(
-                %{data | requests: Map.delete(data.requests, ref), monitors: monitors},
-                current_state
-              )
-            else
-              {:keep_state, put_in(data.requests[ref], %{req | pending_data: rest})}
-            end
-
-          {:empty, _} ->
-            Process.demonitor(req.monitor, [:flush])
-            send(consumer_pid, {:done, ref})
-            if data.pool_pid, do: send(data.pool_pid, {:stream_done, self()})
-            monitors = Map.delete(data.monitors, req.monitor)
-
-            maybe_stop_draining(
-              %{data | requests: Map.delete(data.requests, ref), monitors: monitors},
-              current_state
-            )
-        end
+        demand_drain_pending(ref, consumer_pid, req, data, current_state)
 
       %{mode: :streaming, phase: :body} = req ->
-        case :queue.out(req.pending_data) do
-          {{:value, chunk}, rest} ->
-            send(consumer_pid, {:chunk, ref, chunk})
-            timer = reschedule_idle_timeout(req.idle_timer, ref)
-
-            {:keep_state,
-             put_in(data.requests[ref], %{req | pending_data: rest, idle_timer: timer})}
-
-          {:empty, _} ->
-            timer = reschedule_idle_timeout(req.idle_timer, ref)
-
-            {:keep_state,
-             put_in(data.requests[ref], %{req | demand_pid: consumer_pid, idle_timer: timer})}
-        end
+        demand_body_chunk(ref, consumer_pid, req, data)
 
       _ ->
         :keep_state_and_data
+    end
+  end
+
+  defp demand_finish_stream(ref, consumer_pid, req, data, current_state) do
+    Process.demonitor(req.monitor, [:flush])
+    send(consumer_pid, {:done, ref})
+    if data.pool_pid, do: send(data.pool_pid, {:stream_done, self()})
+    monitors = Map.delete(data.monitors, req.monitor)
+
+    maybe_stop_draining(
+      %{data | requests: Map.delete(data.requests, ref), monitors: monitors},
+      current_state
+    )
+  end
+
+  defp demand_drain_pending(ref, consumer_pid, req, data, current_state) do
+    case :queue.out(req.pending_data) do
+      {{:value, chunk}, rest} ->
+        send(consumer_pid, {:chunk, ref, chunk})
+
+        if :queue.is_empty(rest) do
+          demand_finish_stream(ref, consumer_pid, req, data, current_state)
+        else
+          {:keep_state, put_in(data.requests[ref], %{req | pending_data: rest})}
+        end
+
+      {:empty, _} ->
+        demand_finish_stream(ref, consumer_pid, req, data, current_state)
+    end
+  end
+
+  defp demand_body_chunk(ref, consumer_pid, req, data) do
+    case :queue.out(req.pending_data) do
+      {{:value, chunk}, rest} ->
+        send(consumer_pid, {:chunk, ref, chunk})
+        timer = reschedule_idle_timeout(req.idle_timer, ref)
+
+        {:keep_state, put_in(data.requests[ref], %{req | pending_data: rest, idle_timer: timer})}
+
+      {:empty, _} ->
+        timer = reschedule_idle_timeout(req.idle_timer, ref)
+
+        {:keep_state,
+         put_in(data.requests[ref], %{req | demand_pid: consumer_pid, idle_timer: timer})}
     end
   end
 

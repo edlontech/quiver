@@ -15,7 +15,6 @@ defmodule Quiver.Pool.HTTP2 do
 
   use GenStateMachine, callback_mode: [:state_functions, :state_enter]
 
-  alias Quiver.Config
   alias Quiver.Error.CheckoutTimeout
   alias Quiver.Error.StreamError
   alias Quiver.Pool.HTTP2.Connection
@@ -29,9 +28,17 @@ defmodule Quiver.Pool.HTTP2 do
     connections: %{},
     waiting: :queue.new(),
     max_connections: 5,
-    transport_opts: [],
     checkout_timeout: 15_000
   ]
+
+  @type t :: %__MODULE__{
+          origin: term(),
+          config: map() | nil,
+          connections: map(),
+          waiting: :queue.queue(),
+          max_connections: pos_integer(),
+          checkout_timeout: pos_integer()
+        }
 
   @doc false
   def child_spec(opts) do
@@ -135,25 +142,18 @@ defmodule Quiver.Pool.HTTP2 do
   @impl true
   def init(opts) do
     origin = Keyword.fetch!(opts, :origin)
-    pool_opts = Keyword.get(opts, :pool_opts, [])
+    config = Keyword.get(opts, :pool_opts, [])
 
-    case Config.validate_pool(pool_opts) do
-      {:ok, config} ->
-        :persistent_term.put({__MODULE__, self()}, true)
+    :persistent_term.put({__MODULE__, self()}, true)
 
-        data = %__MODULE__{
-          origin: origin,
-          config: config,
-          max_connections: config[:max_connections],
-          transport_opts: config[:transport_opts] || [],
-          checkout_timeout: config[:checkout_timeout] || 15_000
-        }
+    data = %__MODULE__{
+      origin: origin,
+      config: config,
+      max_connections: Keyword.get(config, :max_connections, 5),
+      checkout_timeout: Keyword.get(config, :checkout_timeout, 15_000)
+    }
 
-        {:ok, :idle, data}
-
-      {:error, reason} ->
-        {:stop, reason}
-    end
+    {:ok, :idle, data}
   end
 
   @impl true
@@ -288,7 +288,7 @@ defmodule Quiver.Pool.HTTP2 do
   defp start_connection(data) do
     opts = [
       origin: data.origin,
-      transport_opts: data.transport_opts,
+      config: data.config,
       pool_pid: self()
     ]
 

@@ -37,14 +37,6 @@ defmodule Quiver.Pool.HTTP1Test do
       GenServer.stop(pool)
       TestServer.stop(server)
     end
-
-    test "rejects invalid pool config" do
-      assert {:error, %Quiver.Error.InvalidPoolOpts{}} =
-               Pool.start_link(
-                 origin: {:http, "127.0.0.1", 80},
-                 pool_opts: [size: -1]
-               )
-    end
   end
 
   describe "request/6" do
@@ -242,7 +234,7 @@ defmodule Quiver.Pool.HTTP1Test do
                Pool.stream_request(pool, :get, "/", [], nil)
 
       chunks = Enum.take(body, 1)
-      assert length(chunks) >= 1
+      assert chunks != []
 
       GenServer.stop(pool)
       TestServer.stop(server)

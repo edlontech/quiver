@@ -156,7 +156,7 @@ defmodule QuiverTest do
                |> Quiver.stream_request(name)
 
       chunks = Enum.take(body, 1)
-      assert length(chunks) >= 1
+      assert chunks != []
     end
   end
 end

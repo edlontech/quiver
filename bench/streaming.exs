@@ -13,8 +13,6 @@ end
 {:ok, h1_server} = BenchServer.start_http1(handler)
 {:ok, h2_server} = BenchServer.start_http2(handler)
 
-transport_opts = [verify: :verify_none, cacerts: h2_server.cacerts]
-
 {:ok, _} =
   Quiver.Supervisor.start_link(
     name: :bench_stream_h1,
@@ -25,7 +23,12 @@ transport_opts = [verify: :verify_none, cacerts: h2_server.cacerts]
   Quiver.Supervisor.start_link(
     name: :bench_stream_h2,
     pools: %{
-      default: [protocol: :http2, max_connections: 3, transport_opts: transport_opts]
+      default: [
+        protocol: :http2,
+        max_connections: 3,
+        verify: :verify_none,
+        cacerts: h2_server.cacerts
+      ]
     }
   )
 

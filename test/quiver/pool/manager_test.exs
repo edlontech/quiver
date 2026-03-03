@@ -91,7 +91,7 @@ defmodule Quiver.Pool.ManagerTest do
         {Quiver.Supervisor,
          name: h2_name,
          pools: %{
-           default: [protocol: :http2, transport_opts: [verify: :verify_none, cacerts: cacerts]]
+           default: [protocol: :http2, verify: :verify_none, cacerts: cacerts]
          }}
       )
 

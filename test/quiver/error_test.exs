@@ -11,7 +11,6 @@ defmodule Quiver.ErrorTest do
   alias Quiver.Error.InvalidPoolOpts
   alias Quiver.Error.InvalidPoolRule
   alias Quiver.Error.InvalidScheme
-  alias Quiver.Error.InvalidTransportOpts
   alias Quiver.Error.MalformedHeaders
   alias Quiver.Error.PoolStartFailed
   alias Quiver.Error.ProtocolViolation
@@ -52,11 +51,6 @@ defmodule Quiver.ErrorTest do
 
     test "InvalidScheme is an invalid error" do
       error = InvalidScheme.exception(scheme: "ftp")
-      assert error.class == :invalid
-    end
-
-    test "InvalidTransportOpts is an invalid error" do
-      error = InvalidTransportOpts.exception(errors: ["bad timeout"])
       assert error.class == :invalid
     end
 
@@ -161,11 +155,6 @@ defmodule Quiver.ErrorTest do
     test "ConnectionClosed includes the message" do
       error = ConnectionClosed.exception(message: "peer closed")
       assert Exception.message(error) =~ "peer closed"
-    end
-
-    test "InvalidTransportOpts includes the errors" do
-      error = InvalidTransportOpts.exception(errors: ["timeout must be positive"])
-      assert Exception.message(error) =~ "timeout must be positive"
     end
 
     test "ProtocolViolation includes the message" do

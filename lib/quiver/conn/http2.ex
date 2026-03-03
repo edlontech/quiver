@@ -82,9 +82,8 @@ defmodule Quiver.Conn.HTTP2 do
   def connect(%URI{scheme: "https", host: host, port: port}, opts) do
     port = port || 443
     recv_timeout = Keyword.get(opts, :recv_timeout, @default_recv_timeout)
-    transport_opts = Keyword.get(opts, :transport_opts, [])
 
-    ssl_opts = Keyword.merge(transport_opts, alpn_advertised_protocols: ["h2"])
+    ssl_opts = Keyword.put(opts, :alpn_advertised_protocols, ["h2"])
 
     case Transport.SSL.connect(host, port, ssl_opts) do
       {:ok, transport} ->
@@ -252,18 +251,22 @@ defmodule Quiver.Conn.HTTP2 do
         {:ok, %{conn | state: :open}}
 
       _ ->
-        case conn.transport_mod.recv(conn.transport, 0, conn.recv_timeout) do
-          {:ok, transport, data} ->
-            buffer = conn.buffer <> data
+        recv_handshake_frame(conn)
+    end
+  end
 
-            case decode_frames(%{conn | transport: transport, buffer: ""}, buffer, []) do
-              {:ok, conn, _fragments} -> handshake_loop(conn)
-              {:error, _conn, reason} -> {:error, reason}
-            end
+  defp recv_handshake_frame(conn) do
+    case conn.transport_mod.recv(conn.transport, 0, conn.recv_timeout) do
+      {:ok, transport, data} ->
+        buffer = conn.buffer <> data
 
-          {:error, _transport, reason} ->
-            {:error, reason}
+        case decode_frames(%{conn | transport: transport, buffer: ""}, buffer, []) do
+          {:ok, conn, _fragments} -> handshake_loop(conn)
+          {:error, _conn, reason} -> {:error, reason}
         end
+
+      {:error, _transport, reason} ->
+        {:error, reason}
     end
   end
 

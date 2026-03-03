@@ -10,7 +10,6 @@ defmodule Quiver.Transport.SSL do
 
   use TypedStruct
 
-  alias Quiver.Config
   alias Quiver.Error.ConnectionClosed
   alias Quiver.Error.ConnectionFailed
   alias Quiver.Error.ConnectionRefused
@@ -26,18 +25,16 @@ defmodule Quiver.Transport.SSL do
 
   @impl true
   def connect(host, port, opts) do
-    with {:ok, validated} <- Config.validate_ssl(opts) do
-      :ssl.start()
+    :ssl.start()
 
-      ssl_opts =
-        base_ssl_opts(host, validated)
-        |> add_verification(to_charlist(host), validated)
-        |> add_alpn(validated)
+    ssl_opts =
+      base_ssl_opts(host, opts)
+      |> add_verification(to_charlist(host), opts)
+      |> add_alpn(opts)
 
-      validated[:connect_timeout]
-      |> do_connect(to_charlist(host), port, ssl_opts)
-      |> handle_connect_result(host, port)
-    end
+    Keyword.get(opts, :connect_timeout, 5_000)
+    |> do_connect(to_charlist(host), port, ssl_opts)
+    |> handle_connect_result(host, port)
   end
 
   @impl true
@@ -99,12 +96,12 @@ defmodule Quiver.Transport.SSL do
   @spec negotiated_protocol(t()) :: binary() | nil
   def negotiated_protocol(%__MODULE__{negotiated_protocol: proto}), do: proto
 
-  defp base_ssl_opts(host, validated) do
+  defp base_ssl_opts(host, opts) do
     [
       :binary,
       active: false,
       packet: :raw,
-      buffer: validated[:buffer_size],
+      buffer: Keyword.get(opts, :buffer_size, 8_192),
       server_name_indication: to_charlist(host)
     ]
   end
@@ -150,10 +147,10 @@ defmodule Quiver.Transport.SSL do
      )}
   end
 
-  defp add_verification(ssl_opts, host_charlist, validated) do
-    case validated[:verify] do
+  defp add_verification(ssl_opts, host_charlist, opts) do
+    case Keyword.get(opts, :verify, :verify_peer) do
       :verify_peer ->
-        cacerts = resolve_cacerts(validated[:cacerts])
+        cacerts = resolve_cacerts(Keyword.get(opts, :cacerts, :default))
 
         ssl_opts ++
           [
@@ -168,8 +165,8 @@ defmodule Quiver.Transport.SSL do
     end
   end
 
-  defp add_alpn(ssl_opts, validated) do
-    case validated[:alpn_advertised_protocols] do
+  defp add_alpn(ssl_opts, opts) do
+    case Keyword.get(opts, :alpn_advertised_protocols, []) do
       [] -> ssl_opts
       protocols -> ssl_opts ++ [alpn_advertised_protocols: protocols]
     end

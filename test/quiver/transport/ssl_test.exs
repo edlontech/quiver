@@ -1,7 +1,6 @@
 defmodule Quiver.Transport.SSLTest do
   use ExUnit.Case, async: true
 
-  alias Quiver.Error.InvalidTransportOpts
   alias Quiver.Error.Timeout
   alias Quiver.Error.TLSHandshakeFailed
   alias Quiver.Error.TLSVerificationFailed
@@ -36,11 +35,6 @@ defmodule Quiver.Transport.SSLTest do
 
       assert match?(%TLSVerificationFailed{}, error) or
                match?(%TLSHandshakeFailed{}, error)
-    end
-
-    test "validates options" do
-      assert {:error, %InvalidTransportOpts{}} =
-               SSL.connect("localhost", 443, connect_timeout: -1)
     end
   end
 
