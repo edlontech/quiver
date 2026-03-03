@@ -1,0 +1,10 @@
+{
+  "release-type": "elixir",
+  "bump-minor-pre-major": true,
+  "packages": {
+    ".": {
+      "package-name": "quiver",
+      "changelogpath": "changelog.md"
+    }
+  }
+}
