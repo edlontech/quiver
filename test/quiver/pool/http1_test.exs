@@ -1,5 +1,6 @@
 defmodule Quiver.Pool.HTTP1Test do
   use Quiver.TestCase.Integration, async: true
+  @moduletag :integration
 
   alias Quiver.Pool.HTTP1, as: Pool
   alias Quiver.TestServer

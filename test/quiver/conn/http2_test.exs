@@ -1,5 +1,6 @@
 defmodule Quiver.Conn.HTTP2Test do
   use Quiver.TestCase.Integration, async: true
+  @moduletag :integration
 
   alias Quiver.Conn.HTTP2, as: Conn
   alias Quiver.TestServer

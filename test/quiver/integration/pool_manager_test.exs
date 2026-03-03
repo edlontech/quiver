@@ -1,5 +1,6 @@
 defmodule Quiver.Integration.PoolManagerTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias Quiver.Pool.HTTP1, as: Pool
   alias Quiver.Pool.Manager

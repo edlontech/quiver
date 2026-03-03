@@ -1,5 +1,6 @@
 defmodule Quiver.Integration.TelemetryIntegrationTest do
   use ExUnit.Case, async: false
+  @moduletag :integration
 
   alias Quiver.Pool.HTTP1, as: PoolHTTP1
   alias Quiver.TestServer

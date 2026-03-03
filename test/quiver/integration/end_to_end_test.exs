@@ -1,5 +1,6 @@
 defmodule Quiver.Integration.EndToEndTest do
   use Quiver.TestCase.Integration, async: true
+  @moduletag :integration
 
   alias Quiver.TestServer
 

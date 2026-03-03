@@ -1,5 +1,6 @@
 defmodule Quiver.Pool.HTTP2IntegrationTest do
   use Quiver.TestCase.Integration, async: true
+  @moduletag :integration
   use AssertEventually, timeout: 2_000, interval: 50
 
   alias Quiver.Pool.HTTP2, as: Pool
