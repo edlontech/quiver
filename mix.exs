@@ -65,6 +65,9 @@ defmodule Quiver.MixProject do
           Quiver.Response,
           Quiver.StreamResponse
         ],
+        Integrations: [
+          Tesla.Adapter.Quiver
+        ],
         Configuration: [
           Quiver.Supervisor,
           Quiver.Config,
@@ -115,7 +118,7 @@ defmodule Quiver.MixProject do
       {:benchee, "~> 1.0", only: :dev},
       {:benchee_html, "~> 1.0", only: :dev},
       {:benchee_json, "~> 1.0", only: :dev},
-      {:finch, "~> 0.19", only: :dev},
+      {:finch, "~> 0.21", only: :dev},
       {:castore, "~> 1.0"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
@@ -132,6 +135,7 @@ defmodule Quiver.MixProject do
       {:splode, "~> 0.2"},
       {:ssl_verify_fun, "~> 1.1"},
       {:telemetry, "~> 1.0"},
+      {:tesla, "~> 1.16", optional: true},
       {:testcontainers, "~> 1.13", only: [:test, :dev]},
       {:typedstruct, "~> 0.5"},
       {:zoi, "~> 0.11"}
