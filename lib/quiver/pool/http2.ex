@@ -27,7 +27,7 @@ defmodule Quiver.Pool.HTTP2 do
     :config,
     connections: %{},
     waiting: :queue.new(),
-    max_connections: 5,
+    max_connections: 1,
     checkout_timeout: 15_000
   ]
 
@@ -149,7 +149,7 @@ defmodule Quiver.Pool.HTTP2 do
     data = %__MODULE__{
       origin: origin,
       config: config,
-      max_connections: Keyword.get(config, :max_connections, 5),
+      max_connections: Keyword.get(config, :max_connections, 1),
       checkout_timeout: Keyword.get(config, :checkout_timeout, 15_000)
     }
 

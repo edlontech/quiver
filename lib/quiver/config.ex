@@ -51,7 +51,7 @@ defmodule Quiver.Config do
               Zoi.integer(description: "Max HTTP/2 connections per origin.")
               |> Zoi.gte(1)
               |> Zoi.optional()
-              |> Zoi.default(5),
+              |> Zoi.default(1),
             connect_timeout:
               Zoi.integer(description: "TCP/TLS connect timeout in ms.")
               |> Zoi.gte(1)

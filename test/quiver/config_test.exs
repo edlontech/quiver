@@ -68,9 +68,9 @@ defmodule Quiver.ConfigTest do
       assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(protocol: :http3)
     end
 
-    test "defaults max_connections to 5" do
+    test "defaults max_connections to 1" do
       assert {:ok, config} = Config.validate_pool([])
-      assert config[:max_connections] == 5
+      assert config[:max_connections] == 1
     end
 
     test "accepts valid max_connections" do
