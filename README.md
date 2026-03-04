@@ -110,6 +110,39 @@ pools = %{
 }
 ```
 
+## Tesla Integration
+
+Quiver ships with an optional [Tesla](https://github.com/elixir-tesla/tesla) adapter.
+Add `tesla` to your dependencies and configure your client:
+
+```elixir
+defmodule MyClient do
+  use Tesla
+
+  plug Tesla.Middleware.BaseUrl, "https://api.example.com"
+  plug Tesla.Middleware.JSON
+
+  adapter Tesla.Adapter.Quiver
+end
+```
+
+All requests go through the default `Quiver.Pool` supervisor. To target a
+custom supervisor, pass it as an adapter option:
+
+```elixir
+adapter Tesla.Adapter.Quiver, name: :my_quiver
+```
+
+Adapter-level options like streaming and timeouts can also be passed
+per-request:
+
+```elixir
+MyClient.get("/large-file", opts: [adapter: [response: :stream]])
+MyClient.get("/slow", opts: [adapter: [receive_timeout: 60_000]])
+```
+
+See `Tesla.Adapter.Quiver` docs for all available options.
+
 ## Documentation
 
 - [Getting Started](guides/getting-started.md)

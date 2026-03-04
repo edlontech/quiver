@@ -109,11 +109,22 @@ defmodule Quiver.Integration.TeslaAdapterTest do
   end
 
   describe "streaming requests" do
-    test "returns lazy body stream", %{name: name, port: port} do
+    test "returns lazy body stream via client-level option", %{name: name, port: port} do
       client = Tesla.client([], {Tesla.Adapter.Quiver, name: name, response: :stream})
 
       assert {:ok, %Tesla.Env{status: 200, body: body}} =
                Tesla.get(client, "http://127.0.0.1:#{port}/stream")
+
+      refute is_binary(body)
+      result = body |> Enum.to_list() |> IO.iodata_to_binary()
+      assert result =~ "chunk1chunk2chunk3"
+    end
+
+    test "returns lazy body stream via per-request adapter option", %{client: client, port: port} do
+      assert {:ok, %Tesla.Env{status: 200, body: body}} =
+               Tesla.get(client, "http://127.0.0.1:#{port}/stream",
+                 opts: [adapter: [response: :stream]]
+               )
 
       refute is_binary(body)
       result = body |> Enum.to_list() |> IO.iodata_to_binary()
