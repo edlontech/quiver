@@ -54,9 +54,14 @@ defmodule Quiver.ConfigTest do
       assert config[:protocol] == :http1
     end
 
-    test "defaults protocol to :http1" do
+    test "accepts protocol :auto" do
+      assert {:ok, config} = Config.validate_pool(protocol: :auto)
+      assert config[:protocol] == :auto
+    end
+
+    test "defaults protocol to :auto" do
       assert {:ok, config} = Config.validate_pool([])
-      assert config[:protocol] == :http1
+      assert config[:protocol] == :auto
     end
 
     test "rejects invalid protocol" do

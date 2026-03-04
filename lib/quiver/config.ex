@@ -42,9 +42,11 @@ defmodule Quiver.Config do
               |> Zoi.optional()
               |> Zoi.default(5_000),
             protocol:
-              Zoi.enum([:http1, :http2], description: "HTTP protocol version to use.")
+              Zoi.enum([:auto, :http1, :http2],
+                description: "HTTP protocol version. :auto detects via ALPN negotiation."
+              )
               |> Zoi.optional()
-              |> Zoi.default(:http1),
+              |> Zoi.default(:auto),
             max_connections:
               Zoi.integer(description: "Max HTTP/2 connections per origin.")
               |> Zoi.gte(1)

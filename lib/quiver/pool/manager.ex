@@ -10,6 +10,7 @@ defmodule Quiver.Pool.Manager do
   alias Quiver.Error.PoolStartFailed
   alias Quiver.Pool.HTTP1
   alias Quiver.Pool.HTTP2
+  alias Quiver.Transport
 
   @type origin :: {:http | :https, String.t(), :inet.port_number()}
 
@@ -46,7 +47,7 @@ defmodule Quiver.Pool.Manager do
   defp start_pool(name, origin) do
     rules = :persistent_term.get({__MODULE__, name, :rules})
     config = Config.resolve_config(rules, origin) || []
-    pool_module = pool_module_for(config)
+    pool_module = pool_module_for(config, origin)
     registry = Quiver.Supervisor.registry_name(name)
     supervisor = Quiver.Supervisor.supervisor_name(name)
 
@@ -60,10 +61,29 @@ defmodule Quiver.Pool.Manager do
     end
   end
 
-  defp pool_module_for(config) do
-    case Keyword.get(config, :protocol, :http1) do
+  defp pool_module_for(config, origin) do
+    case Keyword.get(config, :protocol, :auto) do
       :http2 -> HTTP2
-      _other -> HTTP1
+      :http1 -> HTTP1
+      :auto -> detect_protocol(config, origin)
     end
   end
+
+  defp detect_protocol(config, {:https, host, port}) do
+    ssl_opts =
+      Keyword.take(config, [:connect_timeout, :verify, :cacerts, :buffer_size])
+      |> Keyword.put(:alpn_advertised_protocols, ["h2", "http/1.1"])
+
+    case Transport.SSL.connect(host, port, ssl_opts) do
+      {:ok, transport} ->
+        proto = Transport.SSL.negotiated_protocol(transport)
+        Transport.SSL.close(transport)
+        if proto == "h2", do: HTTP2, else: HTTP1
+
+      {:error, _} ->
+        HTTP1
+    end
+  end
+
+  defp detect_protocol(_config, _origin), do: HTTP1
 end
