@@ -53,6 +53,7 @@ origin_h2 = {:https, "127.0.0.1", h2_server.port}
 {:ok, h2_5conn_pool} = Manager.get_pool(:bench_pressure_h2_5conn, origin_h2)
 
 File.mkdir_p!("bench/output")
+File.mkdir_p!("guides/benchmarks")
 
 Benchee.run(
   %{
@@ -66,7 +67,8 @@ Benchee.run(
   formatters: [
     Benchee.Formatters.Console,
     {Benchee.Formatters.HTML, file: "bench/output/pool_pressure.html"},
-    {Benchee.Formatters.JSON, file: "bench/output/pool_pressure.json"}
+    {Benchee.Formatters.JSON, file: "bench/output/pool_pressure.json"},
+    {Benchee.Formatters.Markdown, file: "guides/benchmarks/pool_pressure.md"}
   ]
 )
 

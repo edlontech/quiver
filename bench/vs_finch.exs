@@ -60,6 +60,7 @@ Finch.start_link(
 )
 
 File.mkdir_p!("bench/output")
+File.mkdir_p!("guides/benchmarks")
 
 # Warm up all pools
 HTTP1.request(q_h1, :get, "/1kb", [], nil)
@@ -94,7 +95,8 @@ for {path, label} <- [{"/1kb", "1kb"}, {"/100kb", "100kb"}, {"/1mb", "1mb"}] do
     parallel: 20,
     formatters: [
       Benchee.Formatters.Console,
-      {Benchee.Formatters.HTML, file: "bench/output/vs_finch_#{label}.html"}
+      {Benchee.Formatters.HTML, file: "bench/output/vs_finch_#{label}.html"},
+      {Benchee.Formatters.Markdown, file: "guides/benchmarks/vs_finch_#{label}.md"}
     ]
   )
 end

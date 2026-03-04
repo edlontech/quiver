@@ -39,6 +39,7 @@ HTTP1.request(h1_pool, :get, "/1kb", [], nil)
 HTTP2.request(h2_pool, :get, "/1kb", [], nil)
 
 File.mkdir_p!("bench/output")
+File.mkdir_p!("guides/benchmarks")
 
 # -- Stream vs collected across payload sizes --
 
@@ -67,7 +68,8 @@ for {path, label} <- [{"/1kb", "1kb"}, {"/100kb", "100kb"}, {"/1mb", "1mb"}] do
     parallel: 10,
     formatters: [
       Benchee.Formatters.Console,
-      {Benchee.Formatters.HTML, file: "bench/output/streaming_#{label}.html"}
+      {Benchee.Formatters.HTML, file: "bench/output/streaming_#{label}.html"},
+      {Benchee.Formatters.Markdown, file: "guides/benchmarks/streaming_#{label}.md"}
     ]
   )
 end
@@ -98,7 +100,8 @@ Benchee.run(
   parallel: 10,
   formatters: [
     Benchee.Formatters.Console,
-    {Benchee.Formatters.HTML, file: "bench/output/streaming_early_halt.html"}
+    {Benchee.Formatters.HTML, file: "bench/output/streaming_early_halt.html"},
+    {Benchee.Formatters.Markdown, file: "guides/benchmarks/streaming_early_halt.md"}
   ]
 )
 

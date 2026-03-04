@@ -34,18 +34,34 @@ defmodule Quiver.MixProject do
   end
 
   defp docs do
+    benchmark_extras =
+      "guides/benchmarks/*.md"
+      |> Path.wildcard()
+      |> Enum.sort()
+      |> Enum.map(fn path ->
+        name =
+          path
+          |> Path.basename(".md")
+          |> String.replace("_", " ")
+          |> String.split()
+          |> Enum.map_join(" ", &String.capitalize/1)
+
+        {path, title: name}
+      end)
+
     [
       main: "readme",
       source_url: "https://github.com/edlontech/quiver",
-      extras: [
-        {"README.md", title: "Overview"},
-        {"guides/getting-started.md", title: "Getting Started"},
-        {"guides/architecture.md", title: "Architecture"},
-        {"guides/error-handling.md", title: "Error Handling"},
-        {"guides/telemetry.md", title: "Telemetry"},
-        {"CHANGELOG.md", title: "Changelog"},
-        {"LICENSE", title: "License"}
-      ],
+      extras:
+        [
+          {"README.md", title: "Overview"},
+          {"guides/getting-started.md", title: "Getting Started"},
+          {"guides/architecture.md", title: "Architecture"},
+          {"guides/error-handling.md", title: "Error Handling"},
+          {"guides/telemetry.md", title: "Telemetry"},
+          {"CHANGELOG.md", title: "Changelog"},
+          {"LICENSE", title: "License"}
+        ] ++ benchmark_extras,
       groups_for_extras: [
         Guides: [
           "guides/getting-started.md",
@@ -53,6 +69,7 @@ defmodule Quiver.MixProject do
           "guides/error-handling.md",
           "guides/telemetry.md"
         ],
+        Benchmarks: ~r/guides\/benchmarks\/.+/,
         About: [
           "CHANGELOG.md",
           "LICENSE"
@@ -118,6 +135,7 @@ defmodule Quiver.MixProject do
       {:benchee, "~> 1.0", only: :dev},
       {:benchee_html, "~> 1.0", only: :dev},
       {:benchee_json, "~> 1.0", only: :dev},
+      {:benchee_markdown, "~> 0.3", only: :dev},
       {:finch, "~> 0.21", only: :dev},
       {:castore, "~> 1.0"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

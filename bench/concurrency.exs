@@ -31,6 +31,7 @@ handler = fn conn -> Plug.Conn.send_resp(conn, 200, ~s({"ok":true})) end
 {:ok, h2_pool} = Manager.get_pool(:bench_concurrency_h2, {:https, "127.0.0.1", h2_server.port})
 
 File.mkdir_p!("bench/output")
+File.mkdir_p!("guides/benchmarks")
 
 Benchee.run(
   %{
@@ -43,7 +44,8 @@ Benchee.run(
   formatters: [
     Benchee.Formatters.Console,
     {Benchee.Formatters.HTML, file: "bench/output/concurrency.html"},
-    {Benchee.Formatters.JSON, file: "bench/output/concurrency.json"}
+    {Benchee.Formatters.JSON, file: "bench/output/concurrency.json"},
+    {Benchee.Formatters.Markdown, file: "guides/benchmarks/concurrency.md"}
   ]
 )
 
