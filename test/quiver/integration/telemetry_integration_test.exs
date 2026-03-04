@@ -46,7 +46,7 @@ defmodule Quiver.Integration.TelemetryIntegrationTest do
   test "emits request start and stop span", %{name: name, port: port} do
     assert {:ok, %Quiver.Response{status: 200}} =
              Quiver.new(:get, "http://127.0.0.1:#{port}/test")
-             |> Quiver.request(name)
+             |> Quiver.request(name: name)
 
     assert_received {:telemetry, [:quiver, :request, :start], %{system_time: _}, meta}
     assert meta.name == name
@@ -60,7 +60,7 @@ defmodule Quiver.Integration.TelemetryIntegrationTest do
   test "emits conn start and stop for fresh connection", %{name: name, port: port} do
     assert {:ok, _} =
              Quiver.new(:get, "http://127.0.0.1:#{port}/test")
-             |> Quiver.request(name)
+             |> Quiver.request(name: name)
 
     assert_received {:telemetry, [:quiver, :conn, :start], %{system_time: _}, meta}
     assert meta.origin == {:http, "127.0.0.1", port}
@@ -73,17 +73,17 @@ defmodule Quiver.Integration.TelemetryIntegrationTest do
   test "does not emit conn span for reused connection", %{name: name, port: port} do
     url = "http://127.0.0.1:#{port}/test"
 
-    assert {:ok, _} = Quiver.new(:get, url) |> Quiver.request(name)
+    assert {:ok, _} = Quiver.new(:get, url) |> Quiver.request(name: name)
 
     assert_received {:telemetry, [:quiver, :conn, :start], _, _}
     assert_received {:telemetry, [:quiver, :conn, :stop], _, _}
 
     poll_until(fn ->
-      {:ok, stats} = Quiver.pool_stats(name, url)
+      {:ok, stats} = Quiver.pool_stats(url, name: name)
       stats.idle >= 1
     end)
 
-    assert {:ok, _} = Quiver.new(:get, url) |> Quiver.request(name)
+    assert {:ok, _} = Quiver.new(:get, url) |> Quiver.request(name: name)
 
     assert_received {:telemetry, [:quiver, :request, :start], _, _}
     assert_received {:telemetry, [:quiver, :request, :stop], _, _}

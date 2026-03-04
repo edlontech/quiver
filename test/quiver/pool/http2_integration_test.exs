@@ -13,7 +13,7 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
     TestServer.start(handler, https: true, http_2_only: true)
   end
 
-  describe "Quiver.stream_request/3 with HTTP/2" do
+  describe "Quiver.stream_request/2 with HTTP/2" do
     test "streams response from HTTP/2 server" do
       {:ok, %{port: port, cacerts: cacerts}} =
         start_server(fn conn -> Plug.Conn.send_resp(conn, 200, "h2 streaming") end)
@@ -30,7 +30,7 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
 
       assert {:ok, %StreamResponse{status: 200, body: body}} =
                Quiver.new(:get, "https://127.0.0.1:#{port}/")
-               |> Quiver.stream_request(name)
+               |> Quiver.stream_request(name: name)
 
       assert body |> Enum.to_list() |> IO.iodata_to_binary() == "h2 streaming"
     end

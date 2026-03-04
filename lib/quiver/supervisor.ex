@@ -33,8 +33,9 @@ defmodule Quiver.Supervisor do
 
   ## Options
 
-    * `:name` (required) - Atom identifying this instance. Must be a compile-time
-      atom; dynamic atom creation from user input will exhaust the atom table.
+    * `:name` - Atom identifying this instance (default: `Quiver.Pool`).
+      Must be a compile-time atom; dynamic atom creation from user input
+      will exhaust the atom table.
 
     * `:pools` - Map of origin patterns to pool configuration. Keys are URI
       strings, wildcard patterns (`"https://*.example.com"`), or `:default`.
@@ -46,6 +47,10 @@ defmodule Quiver.Supervisor do
 
   ## Examples
 
+      # Using the default name:
+      children = [{Quiver.Supervisor, pools: %{default: [size: 5]}}]
+
+      # Using a custom name:
       children = [
         {Quiver.Supervisor,
          name: :my_client,
@@ -58,19 +63,19 @@ defmodule Quiver.Supervisor do
 
   """
 
-  @doc "Starts a named Quiver instance with the given pool configuration."
+  @doc "Starts a Quiver instance with the given pool configuration."
   @spec start_link([
           {:name, atom()} | {:pools, %{optional(binary() | :default) => Config.pool_opts()}}
         ]) ::
           Supervisor.on_start()
   def start_link(opts) do
-    name = Keyword.fetch!(opts, :name)
-    Supervisor.start_link(__MODULE__, opts, name: name)
+    name = Keyword.get(opts, :name, Quiver.default_name())
+    Supervisor.start_link(__MODULE__, Keyword.put(opts, :name, name), name: name)
   end
 
   @impl true
   def init(opts) do
-    name = Keyword.fetch!(opts, :name)
+    name = Keyword.get(opts, :name, Quiver.default_name())
     pools_config = Keyword.get(opts, :pools, %{:default => []})
 
     case Config.parse_rules(pools_config) do

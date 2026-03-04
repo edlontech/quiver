@@ -5,6 +5,13 @@ if Code.ensure_loaded?(Tesla) do
 
     ## Usage
 
+        # Using the default Quiver.Pool supervisor:
+        defmodule MyClient do
+          use Tesla
+          adapter Tesla.Adapter.Quiver
+        end
+
+        # Using a custom supervisor name:
         defmodule MyClient do
           use Tesla
           adapter Tesla.Adapter.Quiver, name: :my_quiver
@@ -12,13 +19,13 @@ if Code.ensure_loaded?(Tesla) do
 
     ## Options
 
-      * `:name` (required) - atom identifying the running `Quiver.Supervisor`
+      * `:name` - atom identifying the running `Quiver.Supervisor` (default: `Quiver.Pool`)
       * `:response` - set to `:stream` for streaming response body (default: buffered)
       * `:receive_timeout` - max ms to wait per response chunk (default: 15,000)
 
     ## Streaming
 
-    When `response: :stream` is set, the adapter uses `Quiver.stream_request/3`
+    When `response: :stream` is set, the adapter uses `Quiver.stream_request/2`
     and returns a `Tesla.Env` with a lazy body stream. Note that some Tesla
     middleware expects a fully buffered body and may not work in streaming mode.
     """
@@ -27,31 +34,13 @@ if Code.ensure_loaded?(Tesla) do
 
     @impl Tesla.Adapter
     def call(env, opts) do
-      with {:ok, adapter_opts} <- validate_opts(env, opts) do
-        request = build_request(env)
-        quiver_opts = build_quiver_opts(adapter_opts)
-        name = adapter_opts[:name]
-
-        case adapter_opts[:response] do
-          :stream -> do_stream_request(env, request, name, quiver_opts)
-          _ -> do_request(env, request, name, quiver_opts)
-        end
-      end
-    end
-
-    defp validate_opts(env, opts) do
       adapter_opts = Tesla.Adapter.opts(env, opts)
+      request = build_request(env)
+      quiver_opts = build_quiver_opts(adapter_opts)
 
-      case Keyword.fetch(adapter_opts, :name) do
-        {:ok, name} when is_atom(name) ->
-          {:ok, adapter_opts}
-
-        _ ->
-          {:error,
-           %ArgumentError{
-             message:
-               "Tesla.Adapter.Quiver requires a :name option identifying the Quiver.Supervisor"
-           }}
+      case adapter_opts[:response] do
+        :stream -> do_stream_request(env, request, quiver_opts)
+        _ -> do_request(env, request, quiver_opts)
       end
     end
 
@@ -75,14 +64,11 @@ if Code.ensure_loaded?(Tesla) do
     defp set_body(request, body), do: Quiver.body(request, body)
 
     defp build_quiver_opts(adapter_opts) do
-      case Keyword.fetch(adapter_opts, :receive_timeout) do
-        {:ok, timeout} -> [receive_timeout: timeout]
-        :error -> []
-      end
+      Keyword.take(adapter_opts, [:name, :receive_timeout])
     end
 
-    defp do_request(%Tesla.Env{} = env, request, name, quiver_opts) do
-      case Quiver.request(request, name, quiver_opts) do
+    defp do_request(%Tesla.Env{} = env, request, quiver_opts) do
+      case Quiver.request(request, quiver_opts) do
         {:ok, response} ->
           {:ok,
            %Tesla.Env{
@@ -97,8 +83,8 @@ if Code.ensure_loaded?(Tesla) do
       end
     end
 
-    defp do_stream_request(%Tesla.Env{} = env, request, name, quiver_opts) do
-      case Quiver.stream_request(request, name, quiver_opts) do
+    defp do_stream_request(%Tesla.Env{} = env, request, quiver_opts) do
+      case Quiver.stream_request(request, quiver_opts) do
         {:ok, stream_response} ->
           {:ok,
            %Tesla.Env{

@@ -35,10 +35,10 @@ defmodule Quiver.SupervisorTest do
       Supervisor.stop(sup)
     end
 
-    test "rejects start without :name option" do
-      assert_raise KeyError, fn ->
-        Quiver.Supervisor.start_link([])
-      end
+    test "defaults to Quiver.Pool when :name is omitted" do
+      {:ok, sup} = Quiver.Supervisor.start_link([])
+      assert Process.whereis(Quiver.Pool) == sup
+      Supervisor.stop(sup)
     end
 
     test "crashes on invalid pool config" do

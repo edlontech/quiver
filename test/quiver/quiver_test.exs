@@ -65,7 +65,7 @@ defmodule QuiverTest do
     end
   end
 
-  describe "request/3 collected mode" do
+  describe "request/2 collected mode" do
     setup do
       name = :"quiver_req_#{System.unique_integer([:positive])}"
 
@@ -82,7 +82,7 @@ defmodule QuiverTest do
     test "executes GET and returns collected response", %{name: name, port: port} do
       assert {:ok, %Response{status: 200, body: "hello"}} =
                Quiver.new(:get, "http://127.0.0.1:#{port}/test")
-               |> Quiver.request(name)
+               |> Quiver.request(name: name)
     end
 
     test "executes POST with headers and body", %{name: name, port: port} do
@@ -90,13 +90,13 @@ defmodule QuiverTest do
                Quiver.new(:post, "http://127.0.0.1:#{port}/test")
                |> Quiver.header("content-type", "text/plain")
                |> Quiver.body("payload")
-               |> Quiver.request(name)
+               |> Quiver.request(name: name)
     end
 
     test "handles URL with query string", %{name: name, port: port} do
       assert {:ok, %Response{status: 200}} =
                Quiver.new(:get, "http://127.0.0.1:#{port}/search?q=test")
-               |> Quiver.request(name)
+               |> Quiver.request(name: name)
     end
   end
 
@@ -116,18 +116,18 @@ defmodule QuiverTest do
 
     test "returns stats after a request creates the pool", %{name: name, port: port} do
       url = "http://127.0.0.1:#{port}/test"
-      assert {:ok, _} = Quiver.new(:get, url) |> Quiver.request(name)
+      assert {:ok, _} = Quiver.new(:get, url) |> Quiver.request(name: name)
 
-      assert {:ok, %{idle: _, active: _, queued: _}} = Quiver.pool_stats(name, url)
+      assert {:ok, %{idle: _, active: _, queued: _}} = Quiver.pool_stats(url, name: name)
     end
 
     test "returns error for unknown origin", %{name: name} do
       assert {:error, :not_found} =
-               Quiver.pool_stats(name, "http://unknown.test:9999")
+               Quiver.pool_stats("http://unknown.test:9999", name: name)
     end
   end
 
-  describe "stream_request/3" do
+  describe "stream_request/2" do
     setup do
       name = :"stream_#{System.unique_integer([:positive])}"
 
@@ -144,7 +144,7 @@ defmodule QuiverTest do
     test "returns StreamResponse with lazy body", %{name: name, port: port} do
       assert {:ok, %Quiver.StreamResponse{status: 200, headers: headers, body: body}} =
                Quiver.new(:get, "http://127.0.0.1:#{port}/test")
-               |> Quiver.stream_request(name)
+               |> Quiver.stream_request(name: name)
 
       assert is_list(headers)
       assert body |> Enum.to_list() |> IO.iodata_to_binary() == "hello"
@@ -153,7 +153,7 @@ defmodule QuiverTest do
     test "body stream supports early termination", %{name: name, port: port} do
       assert {:ok, %Quiver.StreamResponse{body: body}} =
                Quiver.new(:get, "http://127.0.0.1:#{port}/test")
-               |> Quiver.stream_request(name)
+               |> Quiver.stream_request(name: name)
 
       chunks = Enum.take(body, 1)
       assert chunks != []

@@ -4,12 +4,20 @@ defmodule Quiver do
 
   ## Usage
 
-      children = [{Quiver.Supervisor, name: :my_client, pools: %{default: []}}]
+      # Using the default supervisor name (Quiver.Pool):
+      children = [{Quiver.Supervisor, pools: %{default: []}}]
 
       {:ok, %Quiver.Response{status: 200, body: body}} =
         Quiver.new(:get, "https://example.com/api")
         |> Quiver.header("authorization", "Bearer token")
-        |> Quiver.request(:my_client)
+        |> Quiver.request()
+
+      # Using a custom supervisor name:
+      children = [{Quiver.Supervisor, name: :my_client, pools: %{default: []}}]
+
+      {:ok, %Quiver.Response{status: 200, body: body}} =
+        Quiver.new(:get, "https://example.com/api")
+        |> Quiver.request(name: :my_client)
   """
 
   alias Quiver.Pool.HTTP1, as: PoolHTTP1
@@ -20,7 +28,12 @@ defmodule Quiver do
   alias Quiver.StreamResponse
   alias Quiver.Telemetry
 
+  @default_name Quiver.Pool
   @default_receive_timeout 15_000
+
+  @doc "Returns the default supervisor name (`Quiver.Pool`)."
+  @spec default_name() :: atom()
+  def default_name, do: @default_name
 
   @spec new(Quiver.Conn.method(), String.t()) :: Request.t()
   def new(method, url) when is_atom(method) and is_binary(url) do
@@ -43,11 +56,12 @@ defmodule Quiver do
 
   ## Options
 
+  - `:name` -- atom identifying the `Quiver.Supervisor` (default: `Quiver.Pool`)
   - `:receive_timeout` -- max ms to wait per response chunk (default: 15,000)
   """
-  @spec request(Request.t(), atom(), keyword()) ::
-          {:ok, Response.t()} | {:error, term()}
-  def request(%Request{} = request, name, opts \\ []) when is_atom(name) do
+  @spec request(Request.t(), keyword()) :: {:ok, Response.t()} | {:error, term()}
+  def request(%Request{} = request, opts \\ []) do
+    {name, opts} = Keyword.pop(opts, :name, @default_name)
     timeout = Keyword.get(opts, :receive_timeout, @default_receive_timeout)
 
     do_request(request, name, fn pool ->
@@ -72,11 +86,13 @@ defmodule Quiver do
 
   ## Options
 
+  - `:name` -- atom identifying the `Quiver.Supervisor` (default: `Quiver.Pool`)
   - `:receive_timeout` -- max ms to wait per response chunk (default: 15,000)
   """
-  @spec stream_request(Request.t(), atom(), keyword()) ::
+  @spec stream_request(Request.t(), keyword()) ::
           {:ok, StreamResponse.t()} | {:error, term()}
-  def stream_request(%Request{} = request, name, opts \\ []) when is_atom(name) do
+  def stream_request(%Request{} = request, opts \\ []) do
+    {name, opts} = Keyword.pop(opts, :name, @default_name)
     timeout = Keyword.get(opts, :receive_timeout, @default_receive_timeout)
 
     do_request(request, name, fn pool ->
@@ -123,9 +139,16 @@ defmodule Quiver do
     :persistent_term.get({module, pool}, nil) != nil
   end
 
-  @doc "Returns pool stats `%{idle, active, queued}` for the given URL's origin."
-  @spec pool_stats(atom(), String.t()) :: {:ok, map()} | {:error, :not_found}
-  def pool_stats(name, url) when is_atom(name) and is_binary(url) do
+  @doc """
+  Returns pool stats `%{idle, active, queued}` for the given URL's origin.
+
+  ## Options
+
+  - `:name` -- atom identifying the `Quiver.Supervisor` (default: `Quiver.Pool`)
+  """
+  @spec pool_stats(String.t(), keyword()) :: {:ok, map()} | {:error, :not_found}
+  def pool_stats(url, opts \\ []) when is_binary(url) do
+    name = Keyword.get(opts, :name, @default_name)
     uri = URI.parse(url)
     origin = {scheme_to_atom(uri.scheme), uri.host, uri.port || default_port(uri.scheme)}
     Manager.pool_stats(name, origin)

@@ -42,7 +42,7 @@ defmodule Quiver.Integration.EndToEndTest do
     assert {:ok, %Quiver.Response{status: 200, body: body}} =
              Quiver.new(:get, "http://127.0.0.1:#{port}/json")
              |> Quiver.header("accept", "application/json")
-             |> Quiver.request(name)
+             |> Quiver.request(name: name)
 
     assert body =~ "ok"
   end
@@ -52,19 +52,19 @@ defmodule Quiver.Integration.EndToEndTest do
              Quiver.new(:post, "http://127.0.0.1:#{port}/echo")
              |> Quiver.header("content-type", "text/plain")
              |> Quiver.body("test body")
-             |> Quiver.request(name)
+             |> Quiver.request(name: name)
   end
 
   test "non-200 status codes", %{name: name, port: port} do
     assert {:ok, %Quiver.Response{status: 404, body: "not found"}} =
              Quiver.new(:get, "http://127.0.0.1:#{port}/not-found")
-             |> Quiver.request(name)
+             |> Quiver.request(name: name)
   end
 
   test "streaming request returns StreamResponse", %{name: name, port: port} do
     assert {:ok, %Quiver.StreamResponse{status: 200, body: body}} =
              Quiver.new(:get, "http://127.0.0.1:#{port}/json")
-             |> Quiver.stream_request(name)
+             |> Quiver.stream_request(name: name)
 
     result = body |> Enum.to_list() |> IO.iodata_to_binary()
     assert result =~ "ok"
@@ -75,15 +75,15 @@ defmodule Quiver.Integration.EndToEndTest do
 
     for _ <- 1..5 do
       assert {:ok, %Quiver.Response{status: 200}} =
-               Quiver.new(:get, url) |> Quiver.request(name)
+               Quiver.new(:get, url) |> Quiver.request(name: name)
     end
 
     poll_until(fn ->
-      {:ok, stats} = Quiver.pool_stats(name, url)
+      {:ok, stats} = Quiver.pool_stats(url, name: name)
       stats.active == 0
     end)
 
-    {:ok, stats} = Quiver.pool_stats(name, url)
+    {:ok, stats} = Quiver.pool_stats(url, name: name)
     assert stats.idle >= 1
   end
 
@@ -92,7 +92,7 @@ defmodule Quiver.Integration.EndToEndTest do
       for i <- 1..5 do
         Task.async(fn ->
           Quiver.new(:get, "http://127.0.0.1:#{port}/req-#{i}")
-          |> Quiver.request(name)
+          |> Quiver.request(name: name)
         end)
       end
 
@@ -102,9 +102,9 @@ defmodule Quiver.Integration.EndToEndTest do
 
   test "pool_stats returns correct state", %{name: name, port: port} do
     url = "http://127.0.0.1:#{port}/"
-    assert {:ok, _} = Quiver.new(:get, url) |> Quiver.request(name)
+    assert {:ok, _} = Quiver.new(:get, url) |> Quiver.request(name: name)
 
-    assert {:ok, stats} = Quiver.pool_stats(name, url)
+    assert {:ok, stats} = Quiver.pool_stats(url, name: name)
     assert is_integer(stats.idle)
     assert is_integer(stats.active)
     assert is_integer(stats.queued)
@@ -124,10 +124,10 @@ defmodule Quiver.Integration.EndToEndTest do
     {:ok, _} = Quiver.Supervisor.start_link(name: name_b, pools: %{default: [size: 3]})
 
     assert {:ok, %Quiver.Response{status: 200, body: "a"}} =
-             Quiver.new(:get, "http://127.0.0.1:#{port_a}/") |> Quiver.request(name_a)
+             Quiver.new(:get, "http://127.0.0.1:#{port_a}/") |> Quiver.request(name: name_a)
 
     assert {:ok, %Quiver.Response{status: 201, body: "b"}} =
-             Quiver.new(:get, "http://127.0.0.1:#{port_b}/") |> Quiver.request(name_b)
+             Quiver.new(:get, "http://127.0.0.1:#{port_b}/") |> Quiver.request(name: name_b)
 
     TestServer.stop(server_a)
     TestServer.stop(server_b)

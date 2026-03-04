@@ -122,13 +122,6 @@ defmodule Quiver.Integration.TeslaAdapterTest do
   end
 
   describe "error handling" do
-    test "missing :name option returns ArgumentError" do
-      client = Tesla.client([], {Tesla.Adapter.Quiver, []})
-
-      assert {:error, %ArgumentError{}} =
-               Tesla.get(client, "http://127.0.0.1:9999/whatever")
-    end
-
     test "connection failure passes through Quiver error", %{name: name} do
       client = Tesla.client([], {Tesla.Adapter.Quiver, name: name})
 
