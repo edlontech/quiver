@@ -103,11 +103,9 @@ violations). Log them, alert your monitoring system, and investigate.
 | Error | Description |
 |-------|-------------|
 | `Quiver.Error.InvalidScheme` | Unsupported URI scheme |
-| `Quiver.Error.InvalidTransportOpts` | Transport options failed validation |
 | `Quiver.Error.MalformedHeaders` | Unparseable HTTP header line |
 | `Quiver.Error.InvalidContentLength` | Non-numeric or conflicting content-length |
 | `Quiver.Error.InvalidPoolOpts` | Pool options failed validation |
-| `Quiver.Error.InvalidInstanceOpts` | Supervisor options failed validation |
 | `Quiver.Error.InvalidPoolRule` | Pool config key not a valid origin pattern |
 
 ### Unrecoverable Errors

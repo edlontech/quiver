@@ -1,5 +1,6 @@
 defmodule Quiver.Pool.ManagerTest do
   use ExUnit.Case, async: true
+  @moduletag :integration
 
   alias Quiver.Pool.HTTP2
   alias Quiver.Pool.Manager
@@ -99,7 +100,7 @@ defmodule Quiver.Pool.ManagerTest do
       {:ok, pool_pid} = Manager.get_pool(h2_name, origin)
 
       assert {:ok, response} =
-               HTTP2.request(pool_pid, :get, "/", [], nil, recv_timeout: 5_000)
+               HTTP2.request(pool_pid, :get, "/", [], nil, receive_timeout: 5_000)
 
       assert response.status == 200
     end

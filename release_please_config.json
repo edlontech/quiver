@@ -4,7 +4,7 @@
   "packages": {
     ".": {
       "package-name": "quiver",
-      "changelogpath": "changelog.md"
+      "changelogpath": "CHANGELOG.md"
     }
   }
 }

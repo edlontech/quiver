@@ -2,7 +2,7 @@ defmodule Quiver.Conn do
   @moduledoc """
   Behaviour for HTTP connection implementations.
 
-  Connections are protocol-specific data structs (HTTP/1, HTTP/2, HTTP/3)
+  Connections are protocol-specific data structs (HTTP/1, HTTP/2)
   that serialize requests and parse responses over a transport.
 
   All response fragments are tagged with a request reference for

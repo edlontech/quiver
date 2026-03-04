@@ -64,7 +64,7 @@ defmodule Quiver.Pool.HTTP1 do
         ) ::
           {:ok, Quiver.Response.t()} | {:error, term()}
   def request(pool, method, path, headers, body, opts \\ []) do
-    timeout = Keyword.get(opts, :timeout, default_timeout(pool))
+    timeout = Keyword.get(opts, :receive_timeout, default_timeout(pool))
     do_checkout(pool, method, path, headers, body, timeout)
   end
 
@@ -79,7 +79,7 @@ defmodule Quiver.Pool.HTTP1 do
         ) ::
           {:ok, StreamResponse.t()} | {:error, term()}
   def stream_request(pool, method, path, headers, body, opts \\ []) do
-    timeout = Keyword.get(opts, :timeout, default_timeout(pool))
+    timeout = Keyword.get(opts, :receive_timeout, default_timeout(pool))
     do_stream_checkout(pool, method, path, headers, body, timeout)
   end
 

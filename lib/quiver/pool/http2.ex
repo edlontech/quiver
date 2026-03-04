@@ -28,7 +28,7 @@ defmodule Quiver.Pool.HTTP2 do
     connections: %{},
     waiting: :queue.new(),
     max_connections: 1,
-    checkout_timeout: 15_000
+    checkout_timeout: 5_000
   ]
 
   @type t :: %__MODULE__{
@@ -63,7 +63,7 @@ defmodule Quiver.Pool.HTTP2 do
   @spec request(pid(), atom(), String.t(), list(), iodata() | nil, keyword()) ::
           {:ok, Quiver.Response.t()} | {:error, term()}
   def request(pool, method, path, headers, body, opts \\ []) do
-    timeout = Keyword.get(opts, :recv_timeout, 15_000)
+    timeout = Keyword.get(opts, :receive_timeout, 15_000)
     checkout_timeout = Keyword.get(opts, :checkout_timeout, timeout)
     do_request(pool, method, path, headers, body, opts, checkout_timeout)
   end
@@ -79,7 +79,7 @@ defmodule Quiver.Pool.HTTP2 do
   @spec stream_request(pid(), atom(), String.t(), list(), iodata() | nil, keyword()) ::
           {:ok, StreamResponse.t()} | {:error, term()}
   def stream_request(pool, method, path, headers, body, opts \\ []) do
-    timeout = Keyword.get(opts, :recv_timeout, 15_000)
+    timeout = Keyword.get(opts, :receive_timeout, 15_000)
     checkout_timeout = Keyword.get(opts, :checkout_timeout, timeout)
 
     case do_stream_request(pool, method, path, headers, body, opts, checkout_timeout) do
@@ -150,7 +150,7 @@ defmodule Quiver.Pool.HTTP2 do
       origin: origin,
       config: config,
       max_connections: Keyword.get(config, :max_connections, 1),
-      checkout_timeout: Keyword.get(config, :checkout_timeout, 15_000)
+      checkout_timeout: Keyword.get(config, :checkout_timeout, 5_000)
     }
 
     {:ok, :idle, data}
@@ -335,12 +335,12 @@ defmodule Quiver.Pool.HTTP2 do
   end
 
   defp forward_request(conn_pid, from, method, path, headers, body, opts) do
-    timeout = Keyword.get(opts, :recv_timeout, 15_000)
+    timeout = Keyword.get(opts, :receive_timeout, 15_000)
     send(conn_pid, {:forward_request, from, method, path, headers, body, timeout})
   end
 
   defp forward_stream(conn_pid, from, method, path, headers, body, opts) do
-    timeout = Keyword.get(opts, :recv_timeout, 15_000)
+    timeout = Keyword.get(opts, :receive_timeout, 15_000)
     send(conn_pid, {:forward_stream, from, method, path, headers, body, timeout})
   end
 

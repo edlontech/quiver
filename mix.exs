@@ -29,7 +29,7 @@ defmodule Quiver.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger, :ssl, :public_key]
     ]
   end
 
@@ -200,7 +200,8 @@ defmodule Quiver.MixProject do
   defp package() do
     [
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/edlontech/quiver.git"}
+      links: %{"GitHub" => "https://github.com/edlontech/quiver"},
+      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE .formatter.exs)
     ]
   end
 end

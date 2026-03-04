@@ -25,8 +25,6 @@ defmodule Quiver.Transport.SSL do
 
   @impl true
   def connect(host, port, opts) do
-    :ssl.start()
-
     ssl_opts =
       base_ssl_opts(host, opts)
       |> add_verification(to_charlist(host), opts)
@@ -93,6 +91,12 @@ defmodule Quiver.Transport.SSL do
     end
   end
 
+  @doc """
+  Returns the ALPN protocol negotiated during the TLS handshake.
+
+  Returns `nil` if no protocol was negotiated (e.g. no ALPN extension
+  was advertised, or the server did not select one).
+  """
   @spec negotiated_protocol(t()) :: binary() | nil
   def negotiated_protocol(%__MODULE__{negotiated_protocol: proto}), do: proto
 

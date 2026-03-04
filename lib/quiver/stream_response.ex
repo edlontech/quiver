@@ -4,6 +4,9 @@ defmodule Quiver.StreamResponse do
 
   Contains eagerly-received `status` and `headers`, plus a lazy `body`
   stream that yields binary chunks as the caller enumerates it.
+
+  The `ref` field is an opaque internal handle used for stream
+  coordination. Callers should not depend on its value.
   """
 
   use TypedStruct
@@ -12,6 +15,8 @@ defmodule Quiver.StreamResponse do
     field(:status, non_neg_integer(), enforce: true)
     field(:headers, [{String.t(), String.t()}], enforce: true)
     field(:body, Enumerable.t(), enforce: true)
+
+    @typedoc false
     field(:ref, reference(), enforce: true)
   end
 end

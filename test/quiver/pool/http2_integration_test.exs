@@ -53,7 +53,7 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
       origin = {:https, "127.0.0.1", port}
       {:ok, pool_pid} = Manager.get_pool(name, origin)
 
-      assert {:ok, resp} = Pool.request(pool_pid, :get, "/", [], nil, recv_timeout: 5_000)
+      assert {:ok, resp} = Pool.request(pool_pid, :get, "/", [], nil, receive_timeout: 5_000)
       assert resp.status == 200
       assert resp.body == "ok"
     end
@@ -80,7 +80,7 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
       tasks =
         for i <- 1..10 do
           Task.async(fn ->
-            Pool.request(pid, :get, "/req/#{i}", [], nil, recv_timeout: 10_000)
+            Pool.request(pid, :get, "/req/#{i}", [], nil, receive_timeout: 10_000)
           end)
         end
 
@@ -107,7 +107,7 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
         )
 
       assert {:ok, %StreamResponse{status: 200, headers: headers, body: body}} =
-               Pool.stream_request(pid, :get, "/", [], nil, recv_timeout: 5_000)
+               Pool.stream_request(pid, :get, "/", [], nil, receive_timeout: 5_000)
 
       assert is_list(headers)
       assert body |> Enum.to_list() |> IO.iodata_to_binary() == "hello stream"
@@ -132,12 +132,12 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
 
       stream_task =
         Task.async(fn ->
-          Pool.stream_request(pid, :get, "/", [], nil, recv_timeout: 5_000)
+          Pool.stream_request(pid, :get, "/", [], nil, receive_timeout: 5_000)
         end)
 
       collected_task =
         Task.async(fn ->
-          Pool.request(pid, :get, "/", [], nil, recv_timeout: 5_000)
+          Pool.request(pid, :get, "/", [], nil, receive_timeout: 5_000)
         end)
 
       {:ok, %StreamResponse{body: body}} = Task.await(stream_task, 10_000)
@@ -160,7 +160,7 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
         )
 
       {:ok, %StreamResponse{body: body}} =
-        Pool.stream_request(pid, :get, "/", [], nil, recv_timeout: 5_000)
+        Pool.stream_request(pid, :get, "/", [], nil, receive_timeout: 5_000)
 
       chunks = Enum.take(body, 1)
       assert chunks != []
@@ -168,7 +168,7 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
       assert_eventually(Pool.stats(pid).active == 0)
 
       assert {:ok, %Response{status: 200}} =
-               Pool.request(pid, :get, "/", [], nil, recv_timeout: 5_000)
+               Pool.request(pid, :get, "/", [], nil, receive_timeout: 5_000)
     end
   end
 
@@ -187,14 +187,13 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
         )
 
       assert {:ok, %{status: 200}} =
-               Pool.request(pid, :get, "/first", [], nil, recv_timeout: 5_000)
+               Pool.request(pid, :get, "/first", [], nil, receive_timeout: 5_000)
 
       assert Pool.stats(pid).connections == 1
 
       TestServer.stop(%{server: server, agent: agent})
-      Process.sleep(300)
 
-      assert Pool.stats(pid).connections == 0
+      assert_eventually(Pool.stats(pid).connections == 0)
     end
   end
 end

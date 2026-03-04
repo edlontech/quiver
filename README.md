@@ -3,7 +3,6 @@
 A fast, resilient HTTP client for Elixir with built-in connection pooling,
 HTTP/2 multiplexing, and streaming support.
 
-<!-- badges placeholder -->
 
 ## Features
 

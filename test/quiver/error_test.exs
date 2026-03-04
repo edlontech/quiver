@@ -7,7 +7,6 @@ defmodule Quiver.ErrorTest do
   alias Quiver.Error.ConnectionRefused
   alias Quiver.Error.DNSResolutionFailed
   alias Quiver.Error.InvalidContentLength
-  alias Quiver.Error.InvalidInstanceOpts
   alias Quiver.Error.InvalidPoolOpts
   alias Quiver.Error.InvalidPoolRule
   alias Quiver.Error.InvalidScheme
@@ -78,11 +77,6 @@ defmodule Quiver.ErrorTest do
 
     test "InvalidPoolOpts is an invalid error" do
       error = InvalidPoolOpts.exception(errors: ["size must be positive"])
-      assert error.class == :invalid
-    end
-
-    test "InvalidInstanceOpts is an invalid error" do
-      error = InvalidInstanceOpts.exception(errors: ["name is required"])
       assert error.class == :invalid
     end
 
@@ -182,12 +176,6 @@ defmodule Quiver.ErrorTest do
     test "InvalidPoolOpts includes the errors" do
       error = InvalidPoolOpts.exception(errors: ["size must be positive"])
       assert Exception.message(error) =~ "size must be positive"
-    end
-
-    test "InvalidInstanceOpts includes the errors" do
-      error = InvalidInstanceOpts.exception(errors: ["name is required"])
-      assert Exception.message(error) =~ "invalid instance options"
-      assert Exception.message(error) =~ "name is required"
     end
 
     test "InvalidPoolRule includes rule and reason" do

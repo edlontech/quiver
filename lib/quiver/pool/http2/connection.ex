@@ -72,7 +72,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
   @spec request(pid(), atom(), String.t(), list(), iodata() | nil, keyword()) ::
           {:ok, Response.t()} | {:error, term()}
   def request(pid, method, path, headers, body, opts \\ []) do
-    timeout = Keyword.get(opts, :recv_timeout, 15_000)
+    timeout = Keyword.get(opts, :receive_timeout, 15_000)
     GenStateMachine.call(pid, {:request, method, path, headers, body}, timeout)
   catch
     :exit, {:timeout, _} -> {:error, :recv_timeout}
@@ -621,13 +621,13 @@ defmodule Quiver.Pool.HTTP2.Connection do
         _ -> []
       end)
 
-    body =
-      fragments
-      |> Enum.flat_map(fn
+    chunks =
+      Enum.flat_map(fragments, fn
         {:data, d} -> [d]
         _ -> []
       end)
-      |> IO.iodata_to_binary()
+
+    body = if chunks == [], do: nil, else: IO.iodata_to_binary(chunks)
 
     %Response{status: status, headers: headers, body: body}
   end

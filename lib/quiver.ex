@@ -1,6 +1,6 @@
 defmodule Quiver do
   @moduledoc """
-  A mid-level HTTP client for Elixir supporting HTTP/1.1, HTTP/2, and HTTP/3.
+  A mid-level HTTP client for Elixir supporting HTTP/1.1 and HTTP/2.
 
   ## Usage
 
@@ -35,17 +35,59 @@ defmodule Quiver do
   @spec default_name() :: atom()
   def default_name, do: @default_name
 
+  @doc """
+  Creates a new request with the given HTTP method and URL.
+
+  The URL is parsed into a `URI` struct and stored on the request.
+  Combine with `header/3`, `body/2`, and `request/2` to build and execute
+  the full request pipeline.
+
+  ## Examples
+
+      Quiver.new(:get, "https://example.com/api/users")
+
+      Quiver.new(:post, "https://example.com/api/users")
+      |> Quiver.header("content-type", "application/json")
+      |> Quiver.body(~s({"name": "Ada"}))
+      |> Quiver.request()
+  """
   @spec new(Quiver.Conn.method(), String.t()) :: Request.t()
   def new(method, url) when is_atom(method) and is_binary(url) do
     %Request{method: method, url: URI.parse(url)}
   end
 
+  @doc """
+  Appends a header to the request.
+
+  Headers are stored as a list of `{key, value}` tuples. Calling this
+  multiple times with the same key adds duplicate headers (does not
+  replace). Both key and value must be binaries.
+
+  ## Examples
+
+      request
+      |> Quiver.header("authorization", "Bearer token")
+      |> Quiver.header("accept", "application/json")
+  """
   @spec header(Request.t(), String.t(), String.t()) :: Request.t()
   def header(%Request{} = request, key, value)
       when is_binary(key) and is_binary(value) do
     %{request | headers: request.headers ++ [{key, value}]}
   end
 
+  @doc """
+  Sets the request body.
+
+  Accepts any `t:iodata/0` value. Overwrites any previously set body.
+
+  ## Examples
+
+      Quiver.new(:post, "https://example.com/api")
+      |> Quiver.body(~s({"key": "value"}))
+
+      Quiver.new(:put, "https://example.com/upload")
+      |> Quiver.body(["chunk1", "chunk2"])
+  """
   @spec body(Request.t(), iodata()) :: Request.t()
   def body(%Request{} = request, body) do
     %{request | body: body}
@@ -54,10 +96,26 @@ defmodule Quiver do
   @doc """
   Executes the request and returns the full response.
 
+  The entire response body is buffered in memory. For large responses,
+  consider `stream_request/2` instead.
+
+  Pools are selected automatically based on the request's origin
+  (scheme + host + port) and the rules configured in `Quiver.Supervisor`.
+
   ## Options
 
   - `:name` -- atom identifying the `Quiver.Supervisor` (default: `Quiver.Pool`)
-  - `:receive_timeout` -- max ms to wait per response chunk (default: 15,000)
+  - `:receive_timeout` -- max ms to wait for the response (default: 15,000)
+
+  ## Examples
+
+      {:ok, %Quiver.Response{status: 200, body: body}} =
+        Quiver.new(:get, "https://example.com/api")
+        |> Quiver.request()
+
+      {:ok, resp} =
+        Quiver.new(:get, "https://internal.api/data")
+        |> Quiver.request(name: :internal_client, receive_timeout: 30_000)
   """
   @spec request(Request.t(), keyword()) :: {:ok, Response.t()} | {:error, term()}
   def request(%Request{} = request, opts \\ []) do
@@ -73,7 +131,7 @@ defmodule Quiver do
         build_path(request.url),
         request.headers,
         request.body,
-        timeout: timeout
+        receive_timeout: timeout
       )
     end)
   end
@@ -81,13 +139,26 @@ defmodule Quiver do
   @doc """
   Executes the request in streaming mode.
 
-  Returns a `StreamResponse` with eagerly-received status and headers,
-  and a lazy body stream of binary chunks.
+  Returns a `Quiver.StreamResponse` with eagerly-received `status` and
+  `headers`, and a lazy `body` stream that yields binary chunks as the
+  caller enumerates it. The underlying pool connection is held for the
+  lifetime of the stream and released when the stream is fully consumed
+  or halted.
 
   ## Options
 
   - `:name` -- atom identifying the `Quiver.Supervisor` (default: `Quiver.Pool`)
   - `:receive_timeout` -- max ms to wait per response chunk (default: 15,000)
+
+  ## Examples
+
+      {:ok, %Quiver.StreamResponse{status: 200, body: body_stream}} =
+        Quiver.new(:get, "https://example.com/stream/100")
+        |> Quiver.stream_request()
+
+      body_stream
+      |> Stream.each(&IO.write/1)
+      |> Stream.run()
   """
   @spec stream_request(Request.t(), keyword()) ::
           {:ok, StreamResponse.t()} | {:error, term()}
@@ -104,7 +175,7 @@ defmodule Quiver do
         build_path(request.url),
         request.headers,
         request.body,
-        timeout: timeout
+        receive_timeout: timeout
       )
     end)
   end
@@ -140,11 +211,23 @@ defmodule Quiver do
   end
 
   @doc """
-  Returns pool stats `%{idle, active, queued}` for the given URL's origin.
+  Returns pool statistics for the given URL's origin.
+
+  The returned map contains:
+  - `:idle` -- number of idle connections/stream slots
+  - `:active` -- number of in-flight requests
+  - `:queued` -- number of callers waiting for a connection
+
+  Returns `{:error, :not_found}` if no pool exists for the origin yet.
 
   ## Options
 
   - `:name` -- atom identifying the `Quiver.Supervisor` (default: `Quiver.Pool`)
+
+  ## Examples
+
+      {:ok, %{idle: 8, active: 2, queued: 0}} =
+        Quiver.pool_stats("https://example.com")
   """
   @spec pool_stats(String.t(), keyword()) :: {:ok, map()} | {:error, :not_found}
   def pool_stats(url, opts \\ []) when is_binary(url) do

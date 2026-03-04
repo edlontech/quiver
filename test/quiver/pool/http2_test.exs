@@ -19,7 +19,7 @@ defmodule Quiver.Pool.HTTP2Test do
           pool_opts: [verify: :verify_none, cacerts: cacerts]
         )
 
-      assert {:ok, response} = Pool.request(pid, :get, "/", [], nil, recv_timeout: 5_000)
+      assert {:ok, response} = Pool.request(pid, :get, "/", [], nil, receive_timeout: 5_000)
       assert response.status == 200
     end
   end
@@ -45,7 +45,7 @@ defmodule Quiver.Pool.HTTP2Test do
       tasks =
         for i <- 1..10 do
           Task.async(fn ->
-            Pool.request(pid, :get, "/#{i}", [], nil, recv_timeout: 5_000)
+            Pool.request(pid, :get, "/#{i}", [], nil, receive_timeout: 5_000)
           end)
         end
 
@@ -77,7 +77,7 @@ defmodule Quiver.Pool.HTTP2Test do
 
       assert {:ok, resp} =
                Pool.request(pid, :post, "/data", [{"content-type", "text/plain"}], "hello",
-                 recv_timeout: 5_000
+                 receive_timeout: 5_000
                )
 
       assert resp.status == 201

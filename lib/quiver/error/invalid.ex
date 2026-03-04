@@ -52,19 +52,6 @@ defmodule Quiver.Error.InvalidPoolOpts do
   end
 end
 
-defmodule Quiver.Error.InvalidInstanceOpts do
-  @moduledoc """
-  Quiver supervisor options failed validation.
-  """
-
-  use Splode.Error, fields: [:errors], class: :invalid
-  @type t :: Splode.Error.t()
-
-  def message(%{errors: errors}) do
-    "invalid instance options: #{Enum.join(errors, ", ")}"
-  end
-end
-
 defmodule Quiver.Error.InvalidPoolRule do
   @moduledoc """
   Pool config key could not be parsed as a valid origin pattern.

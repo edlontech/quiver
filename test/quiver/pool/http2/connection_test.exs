@@ -49,7 +49,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
           config: [verify: :verify_none, cacerts: cacerts]
         )
 
-      assert {:ok, response} = Connection.request(pid, :get, "/", [], nil, recv_timeout: 5_000)
+      assert {:ok, response} = Connection.request(pid, :get, "/", [], nil, receive_timeout: 5_000)
       assert response.status == 200
       assert response.body == "hello"
     end
@@ -69,7 +69,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
 
       assert {:ok, response} =
                Connection.request(pid, :post, "/", [{"content-type", "text/plain"}], "payload",
-                 recv_timeout: 5_000
+                 receive_timeout: 5_000
                )
 
       assert response.status == 201
@@ -92,7 +92,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       tasks =
         for i <- 1..5 do
           Task.async(fn ->
-            Connection.request(pid, :get, "/path/#{i}", [], nil, recv_timeout: 5_000)
+            Connection.request(pid, :get, "/path/#{i}", [], nil, receive_timeout: 5_000)
           end)
         end
 
@@ -117,9 +117,8 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       assert Connection.open?(pid)
 
       TestServer.stop(%{server: server, agent: agent})
-      Process.sleep(200)
 
-      refute Connection.open?(pid)
+      assert_eventually(not Connection.open?(pid))
     end
   end
 
@@ -139,21 +138,19 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
 
       task =
         Task.async(fn ->
-          Connection.request(pid, :get, "/slow", [], nil, recv_timeout: 60_000)
+          Connection.request(pid, :get, "/slow", [], nil, receive_timeout: 60_000)
         end)
 
-      Process.sleep(100)
-      assert Connection.available_streams(pid) < Connection.max_streams(pid)
+      assert_eventually(Connection.available_streams(pid) < Connection.max_streams(pid))
 
       Task.shutdown(task, :brutal_kill)
-      Process.sleep(300)
 
-      assert Connection.available_streams(pid) == Connection.max_streams(pid)
+      assert_eventually(Connection.available_streams(pid) == Connection.max_streams(pid))
     end
   end
 
   describe "request timeout" do
-    test "returns error on recv_timeout" do
+    test "returns error on receive_timeout" do
       {:ok, %{port: port, cacerts: cacerts}} =
         start_server(fn conn ->
           Process.sleep(5_000)
@@ -167,7 +164,7 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
         )
 
       assert {:error, :recv_timeout} =
-               Connection.request(pid, :get, "/slow", [], nil, recv_timeout: 200)
+               Connection.request(pid, :get, "/slow", [], nil, receive_timeout: 200)
     end
   end
 

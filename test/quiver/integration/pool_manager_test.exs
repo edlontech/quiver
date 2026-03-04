@@ -34,7 +34,9 @@ defmodule Quiver.Integration.PoolManagerTest do
     assert {:ok, %Quiver.Response{status: 200}} = Pool.request(pool, :get, "/", [], nil)
 
     {:ok, stats} = Manager.pool_stats(name, origin)
-    assert stats.idle + stats.active >= 0
+    assert is_map_key(stats, :idle)
+    assert is_map_key(stats, :active)
+    assert is_map_key(stats, :queued)
   end
 
   test "concurrent pool creation for multiple origins", %{name: name, port: port} do
