@@ -151,7 +151,6 @@ defmodule Quiver.MixProject do
       {:nimble_pool, "~> 1.1"},
       {:recode, "~> 0.8", only: [:dev], runtime: false},
       {:splode, "~> 0.2"},
-      {:ssl_verify_fun, "~> 1.1"},
       {:telemetry, "~> 1.0"},
       {:tesla, "~> 1.16", optional: true},
       {:testcontainers, "~> 1.13", only: [:test, :dev]},

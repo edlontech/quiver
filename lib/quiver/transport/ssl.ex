@@ -3,7 +3,7 @@ defmodule Quiver.Transport.SSL do
   SSL/TLS transport wrapping `:ssl`.
 
   Uses the OS certificate store via `:public_key.cacerts_get/0` and
-  ssl_verify_fun for hostname verification by default.
+  OTP's built-in hostname verification with wildcard SAN support.
   """
 
   @behaviour Quiver.Transport
@@ -151,7 +151,7 @@ defmodule Quiver.Transport.SSL do
      )}
   end
 
-  defp add_verification(ssl_opts, host_charlist, opts) do
+  defp add_verification(ssl_opts, _host_charlist, opts) do
     case Keyword.get(opts, :verify, :verify_peer) do
       :verify_peer ->
         cacerts = resolve_cacerts(Keyword.get(opts, :cacerts, :default))
@@ -160,7 +160,7 @@ defmodule Quiver.Transport.SSL do
           [
             verify: :verify_peer,
             cacerts: cacerts,
-            verify_fun: {&:ssl_verify_hostname.verify_fun/3, [check_hostname: host_charlist]},
+            customize_hostname_check: [match_fun: &wildcard_san_match/2],
             depth: 3
           ]
 
@@ -168,6 +168,19 @@ defmodule Quiver.Transport.SSL do
         ssl_opts ++ [verify: :verify_none]
     end
   end
+
+  defp wildcard_san_match({:dns_id, reference}, {:dNSName, [?*, ?. | presented]}) do
+    case strip_first_label(reference) do
+      [] -> :default
+      domain -> :string.casefold(domain) == :string.casefold(presented)
+    end
+  end
+
+  defp wildcard_san_match(_reference, _presented), do: :default
+
+  defp strip_first_label([]), do: []
+  defp strip_first_label([?. | domain]), do: domain
+  defp strip_first_label([_ | rest]), do: strip_first_label(rest)
 
   defp add_alpn(ssl_opts, opts) do
     case Keyword.get(opts, :alpn_advertised_protocols, []) do
