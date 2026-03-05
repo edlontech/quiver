@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/edlontech/quiver/compare/v0.1.0...v0.1.1) (2026-03-05)
+
+
+### Bug Fixes
+
+* Fix TLS wildcard SAN matching for OTP 27+ ([ef70ed2](https://github.com/edlontech/quiver/commit/ef70ed20130d3b22aad44b07c59f91724d3dbe99))
+
 ## 0.1.0 (2026-03-04)
 
 
