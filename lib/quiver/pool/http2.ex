@@ -171,7 +171,7 @@ defmodule Quiver.Pool.HTTP2 do
   def idle({:call, from}, {:request, method, path, headers, body, opts}, data) do
     case start_connection(data) do
       {:ok, conn_pid, data} ->
-        forward_request(conn_pid, from, method, path, headers, body, opts)
+        data = forward_request(conn_pid, from, method, path, headers, body, opts, data)
         {:next_state, :connected, data}
 
       {:error, reason, data} ->
@@ -182,7 +182,7 @@ defmodule Quiver.Pool.HTTP2 do
   def idle({:call, from}, {:stream_request, method, path, headers, body, opts}, data) do
     case start_connection(data) do
       {:ok, conn_pid, data} ->
-        forward_stream(conn_pid, from, method, path, headers, body, opts)
+        data = forward_stream(conn_pid, from, method, path, headers, body, opts, data)
         {:next_state, :connected, data}
 
       {:error, reason, data} ->
@@ -209,7 +209,7 @@ defmodule Quiver.Pool.HTTP2 do
   def connected({:call, from}, {:request, method, path, headers, body, opts}, data) do
     case pick_connection(data) do
       {:ok, conn_pid} ->
-        forward_request(conn_pid, from, method, path, headers, body, opts)
+        data = forward_request(conn_pid, from, method, path, headers, body, opts, data)
         {:keep_state, data}
 
       :none_available ->
@@ -220,7 +220,7 @@ defmodule Quiver.Pool.HTTP2 do
   def connected({:call, from}, {:stream_request, method, path, headers, body, opts}, data) do
     case pick_connection(data) do
       {:ok, conn_pid} ->
-        forward_stream(conn_pid, from, method, path, headers, body, opts)
+        data = forward_stream(conn_pid, from, method, path, headers, body, opts, data)
         {:keep_state, data}
 
       :none_available ->
@@ -238,8 +238,9 @@ defmodule Quiver.Pool.HTTP2 do
     {:keep_state, data}
   end
 
-  def connected(:info, {:stream_opened, conn_pid}, data) do
-    data = update_connection_stream_count(data, conn_pid, 1)
+  def connected(:info, {:stream_open_failed, conn_pid}, data) do
+    data = update_connection_stream_count(data, conn_pid, -1)
+    data = maybe_dequeue(data)
     {:keep_state, data}
   end
 
@@ -274,7 +275,7 @@ defmodule Quiver.Pool.HTTP2 do
     if map_size(data.connections) < data.max_connections do
       case start_connection(data) do
         {:ok, conn_pid, data} ->
-          forward_request(conn_pid, from, method, path, headers, body, opts)
+          data = forward_request(conn_pid, from, method, path, headers, body, opts, data)
           {:keep_state, data}
 
         {:error, _reason, data} ->
@@ -306,15 +307,20 @@ defmodule Quiver.Pool.HTTP2 do
   end
 
   defp pick_connection(data) do
-    result =
-      data.connections
-      |> Enum.filter(fn {_pid, info} ->
-        info.state == :connected and info.stream_count < info.max_streams
-      end)
-      |> Enum.min_by(fn {_pid, info} -> info.stream_count end, fn -> nil end)
+    data.connections
+    |> Enum.reduce(nil, fn
+      {pid, %{state: :connected, stream_count: c, max_streams: max}}, nil when c < max ->
+        {pid, c}
 
-    case result do
-      {pid, _info} -> {:ok, pid}
+      {pid, %{state: :connected, stream_count: c, max_streams: max}}, {_, best}
+      when c < max and c < best ->
+        {pid, c}
+
+      _, acc ->
+        acc
+    end)
+    |> case do
+      {pid, _} -> {:ok, pid}
       nil -> :none_available
     end
   end
@@ -323,7 +329,7 @@ defmodule Quiver.Pool.HTTP2 do
     if map_size(data.connections) < data.max_connections do
       case start_connection(data) do
         {:ok, conn_pid, data} ->
-          forward_stream(conn_pid, from, method, path, headers, body, opts)
+          data = forward_stream(conn_pid, from, method, path, headers, body, opts, data)
           {:keep_state, data}
 
         {:error, _reason, data} ->
@@ -334,14 +340,16 @@ defmodule Quiver.Pool.HTTP2 do
     end
   end
 
-  defp forward_request(conn_pid, from, method, path, headers, body, opts) do
+  defp forward_request(conn_pid, from, method, path, headers, body, opts, data) do
     timeout = Keyword.get(opts, :receive_timeout, 15_000)
     send(conn_pid, {:forward_request, from, method, path, headers, body, timeout})
+    update_connection_stream_count(data, conn_pid, 1)
   end
 
-  defp forward_stream(conn_pid, from, method, path, headers, body, opts) do
+  defp forward_stream(conn_pid, from, method, path, headers, body, opts, data) do
     timeout = Keyword.get(opts, :receive_timeout, 15_000)
     send(conn_pid, {:forward_stream, from, method, path, headers, body, timeout})
+    update_connection_stream_count(data, conn_pid, 1)
   end
 
   defp enqueue(from, method, path, headers, body, opts, data) do
@@ -393,8 +401,7 @@ defmodule Quiver.Pool.HTTP2 do
   defp dispatch_queued({from, method, path, headers, body, opts, _deadline}, rest, data) do
     case pick_connection(data) do
       {:ok, conn_pid} ->
-        forward_request(conn_pid, from, method, path, headers, body, opts)
-        %{data | waiting: rest}
+        forward_request(conn_pid, from, method, path, headers, body, opts, %{data | waiting: rest})
 
       :none_available ->
         data
@@ -404,8 +411,7 @@ defmodule Quiver.Pool.HTTP2 do
   defp dispatch_queued({:stream, from, method, path, headers, body, opts, _deadline}, rest, data) do
     case pick_connection(data) do
       {:ok, conn_pid} ->
-        forward_stream(conn_pid, from, method, path, headers, body, opts)
-        %{data | waiting: rest}
+        forward_stream(conn_pid, from, method, path, headers, body, opts, %{data | waiting: rest})
 
       :none_available ->
         data

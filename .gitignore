@@ -25,5 +25,7 @@ quiver-*.tar
 ### macOS ###
 # General
 .DS_Store
+.env
+.envrc
 
 /bench/output/

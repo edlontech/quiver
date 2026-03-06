@@ -153,11 +153,11 @@ defmodule Quiver.Pool.HTTP2.Connection do
         request = %{from: from, caller_pid: caller_pid, monitor: mon, acc: []}
         requests = Map.put(data.requests, ref, request)
         monitors = Map.put(data.monitors, mon, ref)
-        if data.pool_pid, do: send(data.pool_pid, {:stream_opened, self()})
         {:keep_state, %{data | conn: conn, requests: requests, monitors: monitors}}
 
       {:error, conn, reason} ->
         GenStateMachine.reply(from, {:error, reason})
+        if data.pool_pid, do: send(data.pool_pid, {:stream_open_failed, self()})
         {:keep_state, %{data | conn: conn}}
     end
   end
@@ -184,11 +184,11 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
         requests = Map.put(data.requests, ref, request)
         monitors = Map.put(data.monitors, mon, ref)
-        if data.pool_pid, do: send(data.pool_pid, {:stream_opened, self()})
         {:keep_state, %{data | conn: conn, requests: requests, monitors: monitors}}
 
       {:error, conn, reason} ->
         GenStateMachine.reply(from, {:error, reason})
+        if data.pool_pid, do: send(data.pool_pid, {:stream_open_failed, self()})
         {:keep_state, %{data | conn: conn}}
     end
   end
@@ -609,25 +609,14 @@ defmodule Quiver.Pool.HTTP2.Connection do
   defp cancel_idle_timer(_), do: :ok
 
   defp assemble_response(fragments) do
-    status =
-      Enum.find_value(fragments, fn
-        {:status, s} -> s
-        _ -> nil
+    {status, headers, chunks} =
+      Enum.reduce(fragments, {nil, [], []}, fn
+        {:status, s}, {_, h, c} -> {s, h, c}
+        {:headers, h}, {s, hs, c} -> {s, hs ++ h, c}
+        {:data, d}, {s, h, cs} -> {s, h, [d | cs]}
       end)
 
-    headers =
-      Enum.flat_map(fragments, fn
-        {:headers, h} -> h
-        _ -> []
-      end)
-
-    chunks =
-      Enum.flat_map(fragments, fn
-        {:data, d} -> [d]
-        _ -> []
-      end)
-
-    body = if chunks == [], do: nil, else: IO.iodata_to_binary(chunks)
+    body = if chunks == [], do: nil, else: IO.iodata_to_binary(:lists.reverse(chunks))
 
     %Response{status: status, headers: headers, body: body}
   end

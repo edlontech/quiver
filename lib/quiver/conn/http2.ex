@@ -287,20 +287,21 @@ defmodule Quiver.Conn.HTTP2 do
     {encoded_headers, encode_table} = HPAX.encode(:store, all_headers, conn.encode_table)
     header_block = IO.iodata_to_binary(encoded_headers)
 
-    end_stream? = body == nil or body == "" or body == []
-    frames = [Frame.encode_headers(stream_id, header_block, true, end_stream?)]
+    has_body? = body != nil and body != "" and body != []
+    headers_end_stream? = not has_body?
+    header_frame = Frame.encode_headers(stream_id, header_block, true, headers_end_stream?)
 
     frames =
-      if end_stream? do
-        frames
-      else
+      if has_body? do
         body_binary = IO.iodata_to_binary(body)
-        frames ++ [Frame.encode_data(stream_id, body_binary, true)]
+        [header_frame | split_data_frames(stream_id, body_binary, server_max_frame_size(conn))]
+      else
+        [header_frame]
       end
 
     case conn.transport_mod.send(conn.transport, frames) do
       {:ok, transport} ->
-        stream_state = if end_stream?, do: :half_closed_local, else: :open
+        stream_state = :half_closed_local
 
         stream = %{
           id: stream_id,
@@ -813,6 +814,21 @@ defmodule Quiver.Conn.HTTP2 do
 
   defp server_initial_window_size(%__MODULE__{server_settings: settings}) do
     Map.get(settings, :initial_window_size, @default_initial_window_size)
+  end
+
+  defp server_max_frame_size(%__MODULE__{server_settings: settings}) do
+    Map.get(settings, :max_frame_size, @default_max_frame_size)
+  end
+
+  defp split_data_frames(_stream_id, <<>>, _max_size), do: []
+
+  defp split_data_frames(stream_id, body, max_size) when byte_size(body) <= max_size do
+    [Frame.encode_data(stream_id, body, true)]
+  end
+
+  defp split_data_frames(stream_id, body, max_size) do
+    <<chunk::binary-size(max_size), rest::binary>> = body
+    [Frame.encode_data(stream_id, chunk, false) | split_data_frames(stream_id, rest, max_size)]
   end
 
   defp settings_to_pairs(settings) do
