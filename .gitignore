@@ -27,5 +27,6 @@ quiver-*.tar
 .DS_Store
 .env
 .envrc
+guides/benchmarks
 
 /bench/output/

@@ -187,6 +187,13 @@ defmodule Quiver.Conn.HTTP2.Frame do
   end
 
   @doc false
+  @spec encode_data_sized(non_neg_integer(), binary(), non_neg_integer(), boolean()) :: iodata()
+  def encode_data_sized(stream_id, payload, size, end_stream?) do
+    flags = if end_stream?, do: @flag_end_stream, else: 0
+    [<<size::24, @data::8, flags::8, 0::1, stream_id::31>>, payload]
+  end
+
+  @doc false
   @spec encode_headers(non_neg_integer(), iodata(), boolean(), boolean()) :: iodata()
   def encode_headers(stream_id, header_block, end_headers?, end_stream?) do
     flags = 0

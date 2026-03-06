@@ -231,6 +231,71 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
     end
   end
 
+  describe "flow-controlled POST" do
+    test "large POST body completes through connection worker" do
+      {:ok, %{port: port, cacerts: cacerts}} =
+        start_server(fn conn ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          Plug.Conn.send_resp(conn, 200, "#{byte_size(body)}")
+        end)
+
+      {:ok, pid} =
+        Connection.start_link(
+          origin: {:https, "127.0.0.1", port},
+          config: [verify: :verify_none, cacerts: cacerts]
+        )
+
+      large_body = :crypto.strong_rand_bytes(200_000)
+
+      assert {:ok, response} =
+               Connection.request(
+                 pid,
+                 :post,
+                 "/",
+                 [{"content-type", "application/octet-stream"}],
+                 large_body, receive_timeout: 30_000)
+
+      assert response.status == 200
+      assert response.body == "200000"
+    end
+
+    test "concurrent large POSTs complete through connection worker" do
+      {:ok, %{port: port, cacerts: cacerts}} =
+        start_server(fn conn ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          Plug.Conn.send_resp(conn, 200, "#{byte_size(body)}")
+        end)
+
+      {:ok, pid} =
+        Connection.start_link(
+          origin: {:https, "127.0.0.1", port},
+          config: [verify: :verify_none, cacerts: cacerts]
+        )
+
+      tasks =
+        for _ <- 1..5 do
+          Task.async(fn ->
+            body = :crypto.strong_rand_bytes(100_000)
+
+            Connection.request(
+              pid,
+              :post,
+              "/",
+              [{"content-type", "application/octet-stream"}],
+              body, receive_timeout: 30_000)
+          end)
+        end
+
+      results = Task.await_many(tasks, 60_000)
+
+      for result <- results do
+        assert {:ok, response} = result
+        assert response.status == 200
+        assert response.body == "100000"
+      end
+    end
+  end
+
   defp collect_stream_chunks(worker, ref, acc \\ []) do
     send(worker, {:demand, ref, self()})
 

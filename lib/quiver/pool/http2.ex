@@ -207,8 +207,8 @@ defmodule Quiver.Pool.HTTP2 do
   def connected(:enter, _old, _data), do: :keep_state_and_data
 
   def connected({:call, from}, {:request, method, path, headers, body, opts}, data) do
-    case pick_connection(data) do
-      {:ok, conn_pid} ->
+    case maybe_expand_and_pick(data) do
+      {:ok, conn_pid, data} ->
         data = forward_request(conn_pid, from, method, path, headers, body, opts, data)
         {:keep_state, data}
 
@@ -218,8 +218,8 @@ defmodule Quiver.Pool.HTTP2 do
   end
 
   def connected({:call, from}, {:stream_request, method, path, headers, body, opts}, data) do
-    case pick_connection(data) do
-      {:ok, conn_pid} ->
+    case maybe_expand_and_pick(data) do
+      {:ok, conn_pid, data} ->
         data = forward_stream(conn_pid, from, method, path, headers, body, opts, data)
         {:keep_state, data}
 
@@ -303,6 +303,26 @@ defmodule Quiver.Pool.HTTP2 do
 
       {:error, reason} ->
         {:error, reason, data}
+    end
+  end
+
+  defp maybe_expand_and_pick(data) do
+    conn_count = map_size(data.connections)
+
+    if conn_count < data.max_connections do
+      case start_connection(data) do
+        {:ok, conn_pid, data} -> {:ok, conn_pid, data}
+        {:error, _reason, _data} -> pick_connection_result(data)
+      end
+    else
+      pick_connection_result(data)
+    end
+  end
+
+  defp pick_connection_result(data) do
+    case pick_connection(data) do
+      {:ok, pid} -> {:ok, pid, data}
+      :none_available -> :none_available
     end
   end
 

@@ -18,7 +18,8 @@ defmodule Quiver.Pool.HTTP2.Connection do
     :config,
     :pool_pid,
     requests: %{},
-    monitors: %{}
+    monitors: %{},
+    write_queue: []
   ]
 
   @type t :: %__MODULE__{
@@ -27,7 +28,8 @@ defmodule Quiver.Pool.HTTP2.Connection do
           config: keyword(),
           pool_pid: pid() | nil,
           requests: map(),
-          monitors: map()
+          monitors: map(),
+          write_queue: [iodata()]
         }
 
   @stream_idle_timeout 30_000
@@ -147,13 +149,14 @@ defmodule Quiver.Pool.HTTP2.Connection do
   def connected(:info, {:forward_request, from, method, path, headers, body, _timeout}, data) do
     {caller_pid, _tag} = from
 
-    case H2.open_request(data.conn, method, path, headers, body) do
-      {:ok, conn, ref} ->
+    case H2.prepare_request(data.conn, method, path, headers, body) do
+      {:ok, conn, ref, frames} ->
         mon = Process.monitor(caller_pid)
         request = %{from: from, caller_pid: caller_pid, monitor: mon, acc: []}
         requests = Map.put(data.requests, ref, request)
         monitors = Map.put(data.monitors, mon, ref)
-        {:keep_state, %{data | conn: conn, requests: requests, monitors: monitors}}
+        data = %{data | conn: conn, requests: requests, monitors: monitors}
+        schedule_flush(data, frames)
 
       {:error, conn, reason} ->
         GenStateMachine.reply(from, {:error, reason})
@@ -165,8 +168,8 @@ defmodule Quiver.Pool.HTTP2.Connection do
   def connected(:info, {:forward_stream, from, method, path, headers, body, _timeout}, data) do
     {caller_pid, _tag} = from
 
-    case H2.open_request(data.conn, method, path, headers, body) do
-      {:ok, conn, ref} ->
+    case H2.prepare_request(data.conn, method, path, headers, body) do
+      {:ok, conn, ref, frames} ->
         mon = Process.monitor(caller_pid)
 
         request = %{
@@ -184,7 +187,8 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
         requests = Map.put(data.requests, ref, request)
         monitors = Map.put(data.monitors, mon, ref)
-        {:keep_state, %{data | conn: conn, requests: requests, monitors: monitors}}
+        data = %{data | conn: conn, requests: requests, monitors: monitors}
+        schedule_flush(data, frames)
 
       {:error, conn, reason} ->
         GenStateMachine.reply(from, {:error, reason})
@@ -235,6 +239,10 @@ defmodule Quiver.Pool.HTTP2.Connection do
       {_, _} ->
         :keep_state_and_data
     end
+  end
+
+  def connected(:info, :flush_writes, data) do
+    flush_write_queue(data)
   end
 
   def connected(:info, {:DOWN, mon, :process, _pid, _reason}, data) do
@@ -335,6 +343,10 @@ defmodule Quiver.Pool.HTTP2.Connection do
       {_, _} ->
         maybe_stop_draining(data, :draining)
     end
+  end
+
+  def draining(:info, :flush_writes, data) do
+    flush_write_queue(data)
   end
 
   def draining(:info, {:DOWN, mon, :process, _pid, _reason}, data) do
@@ -544,6 +556,29 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
         {:keep_state,
          put_in(data.requests[ref], %{req | demand_pid: consumer_pid, idle_timer: timer})}
+    end
+  end
+
+  defp schedule_flush(data, frames) do
+    was_empty = data.write_queue == []
+    data = %{data | write_queue: [data.write_queue | frames]}
+    if was_empty, do: send(self(), :flush_writes)
+    {:keep_state, data}
+  end
+
+  defp flush_write_queue(%{write_queue: []} = data) do
+    {:keep_state, data}
+  end
+
+  defp flush_write_queue(data) do
+    case data.conn.transport_mod.send(data.conn.transport, data.write_queue) do
+      {:ok, transport} ->
+        data = put_in(data.conn.transport, transport)
+        {:keep_state, %{data | write_queue: []}}
+
+      {:error, transport, reason} ->
+        data = put_in(data.conn.transport, transport)
+        {:stop, {:shutdown, reason}, %{data | write_queue: []}}
     end
   end
 

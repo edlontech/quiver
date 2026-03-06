@@ -72,6 +72,11 @@ defmodule Quiver.Conn.HTTP2 do
     field(:ping_queue, :queue.queue(), default: :queue.new())
     field(:recv_timeout, timeout(), default: @default_recv_timeout)
 
+    field(:open_stream_count, non_neg_integer(), default: 0)
+
+    field(:cached_max_frame_size, pos_integer(), default: @default_max_frame_size)
+    field(:cached_initial_window_size, pos_integer(), default: @default_initial_window_size)
+
     field(:received_server_settings?, boolean(), default: false)
     field(:headers_being_processed, {pos_integer(), iolist(), boolean()} | nil, default: nil)
   end
@@ -131,7 +136,7 @@ defmodule Quiver.Conn.HTTP2 do
     goaway = Frame.encode_goaway(last_id, @error_no_error, "")
     _ = mod.send(transport, goaway)
     _ = mod.close(transport)
-    {:ok, %{conn | state: :closed}}
+    {:ok, %{conn | state: :closed, open_stream_count: 0}}
   end
 
   @impl true
@@ -158,6 +163,30 @@ defmodule Quiver.Conn.HTTP2 do
     end
   end
 
+  @doc """
+  Prepares a request without sending any frames over the transport.
+
+  Returns `{:ok, conn, ref, frames}` where `frames` is iodata ready
+  to be sent via `transport.send`. The caller is responsible for sending
+  the frames, enabling batching of multiple requests into a single write.
+  """
+  @spec prepare_request(t(), atom(), String.t(), list(), iodata() | nil) ::
+          {:ok, t(), reference(), iodata()} | {:error, t(), term()}
+  def prepare_request(%__MODULE__{state: state} = conn, _method, _path, _headers, _body)
+      when state != :open do
+    {:error, conn, ProtocolViolation.exception(message: "connection not open (state: #{state})")}
+  end
+
+  def prepare_request(%__MODULE__{} = conn, method, path, headers, body) do
+    max = max_concurrent_streams(conn)
+
+    if open_request_count(conn) >= max do
+      {:error, conn, MaxConcurrentStreamsReached.exception(max: max)}
+    else
+      prepare_open_request(conn, method, path, headers, body)
+    end
+  end
+
   @impl true
   def stream(%__MODULE__{transport: %{socket: socket}} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
@@ -172,12 +201,12 @@ defmodule Quiver.Conn.HTTP2 do
           s.state in [:open, :half_closed_local],
           do: {:error, s.ref, ConnectionClosed.exception(message: "connection closed")}
 
-    {:error, %{conn | state: :closed}, fragments}
+    {:error, %{conn | state: :closed, open_stream_count: 0}, fragments}
   end
 
   def stream(%__MODULE__{transport: %{socket: socket}} = conn, {error_tag, socket, reason})
       when error_tag in [:tcp_error, :ssl_error] do
-    {:error, %{conn | state: :closed}, reason}
+    {:error, %{conn | state: :closed, open_stream_count: 0}, reason}
   end
 
   def stream(%__MODULE__{}, _message), do: :unknown
@@ -203,9 +232,7 @@ defmodule Quiver.Conn.HTTP2 do
   end
 
   @impl true
-  def open_request_count(%__MODULE__{streams: streams}) do
-    Enum.count(streams, fn {_id, s} -> s.state in [:open, :half_closed_local] end)
-  end
+  def open_request_count(%__MODULE__{open_stream_count: count}), do: count
 
   @impl true
   def max_concurrent_streams(%__MODULE__{server_settings: settings}) do
@@ -272,7 +299,7 @@ defmodule Quiver.Conn.HTTP2 do
 
   # -- Sending requests --
 
-  defp do_open_request(conn, method, path, headers, body) do
+  defp prepare_open_request(conn, method, path, headers, body) do
     stream_id = conn.next_stream_id
     ref = make_ref()
 
@@ -291,41 +318,79 @@ defmodule Quiver.Conn.HTTP2 do
     headers_end_stream? = not has_body?
     header_frame = Frame.encode_headers(stream_id, header_block, true, headers_end_stream?)
 
-    frames =
-      if has_body? do
-        body_binary = IO.iodata_to_binary(body)
-        [header_frame | split_data_frames(stream_id, body_binary, server_max_frame_size(conn))]
-      else
-        [header_frame]
-      end
+    stream = %{
+      id: stream_id,
+      ref: ref,
+      state: if(has_body?, do: :open, else: :half_closed_local),
+      send_window: server_initial_window_size(conn),
+      recv_window: conn.client_settings.initial_window_size,
+      recv_window_consumed: 0,
+      received_headers?: false,
+      pending_send: nil
+    }
 
-    case conn.transport_mod.send(conn.transport, frames) do
-      {:ok, transport} ->
-        stream_state = :half_closed_local
+    conn = %{
+      conn
+      | encode_table: encode_table,
+        next_stream_id: stream_id + 2,
+        streams: Map.put(conn.streams, stream_id, stream),
+        ref_to_stream_id: Map.put(conn.ref_to_stream_id, ref, stream_id),
+        open_stream_count: conn.open_stream_count + 1
+    }
 
-        stream = %{
-          id: stream_id,
-          ref: ref,
-          state: stream_state,
-          send_window: server_initial_window_size(conn),
-          recv_window: conn.client_settings.initial_window_size,
-          recv_window_consumed: 0,
-          received_headers?: false
-        }
+    if has_body? do
+      prepare_body_frames(conn, stream_id, header_frame, body)
+    else
+      {:ok, conn, ref, header_frame}
+    end
+  end
+
+  defp prepare_body_frames(conn, stream_id, header_frame, body) do
+    stream = Map.fetch!(conn.streams, stream_id)
+    max_frame = server_max_frame_size(conn)
+    allowed = min(conn.send_window, stream.send_window)
+    body_binary = ensure_binary(body)
+    total = byte_size(body_binary)
+
+    cond do
+      total <= allowed ->
+        data_frames = split_data_frames(stream_id, body_binary, max_frame)
+        stream = %{stream | send_window: stream.send_window - total, state: :half_closed_local}
 
         conn = %{
           conn
-          | transport: transport,
-            encode_table: encode_table,
-            next_stream_id: stream_id + 2,
-            streams: Map.put(conn.streams, stream_id, stream),
-            ref_to_stream_id: Map.put(conn.ref_to_stream_id, ref, stream_id)
+          | send_window: conn.send_window - total,
+            streams: Map.put(conn.streams, stream_id, stream)
         }
 
-        {:ok, conn, ref}
+        {:ok, conn, stream.ref, [header_frame | data_frames]}
 
-      {:error, transport, reason} ->
-        {:error, %{conn | transport: transport}, reason}
+      allowed > 0 ->
+        <<chunk::binary-size(allowed), rest::binary>> = body_binary
+        data_frames = split_data_frames_no_end(stream_id, chunk, max_frame)
+        stream = %{stream | pending_send: rest, send_window: stream.send_window - allowed}
+
+        conn = %{
+          conn
+          | send_window: conn.send_window - allowed,
+            streams: Map.put(conn.streams, stream_id, stream)
+        }
+
+        {:ok, conn, stream.ref, [header_frame | data_frames]}
+
+      true ->
+        stream = %{stream | pending_send: body_binary}
+        conn = %{conn | streams: Map.put(conn.streams, stream_id, stream)}
+        {:ok, conn, stream.ref, header_frame}
+    end
+  end
+
+  defp do_open_request(conn, method, path, headers, body) do
+    {:ok, conn, ref, frames} = prepare_open_request(conn, method, path, headers, body)
+
+    case conn.transport_mod.send(conn.transport, frames) do
+      {:ok, transport} -> {:ok, %{conn | transport: transport}, ref}
+      {:error, transport, reason} -> {:error, %{conn | transport: transport}, reason}
     end
   end
 
@@ -510,7 +575,10 @@ defmodule Quiver.Conn.HTTP2 do
           conn
           | transport: transport,
             server_settings: server_settings,
-            received_server_settings?: true
+            received_server_settings?: true,
+            cached_max_frame_size:
+              Map.get(server_settings, :max_frame_size, @default_max_frame_size),
+            cached_initial_window_size: new_initial
         }
 
         conn = adjust_stream_windows(conn, delta)
@@ -525,7 +593,8 @@ defmodule Quiver.Conn.HTTP2 do
 
   defp handle_frame(conn, {:window_update, 0, increment}) do
     new_window = min(conn.send_window + increment, @max_window_size)
-    {:ok, %{conn | send_window: new_window}, []}
+    conn = %{conn | send_window: new_window}
+    flush_all_pending_sends(conn)
   end
 
   defp handle_frame(conn, {:window_update, stream_id, increment}) do
@@ -536,7 +605,13 @@ defmodule Quiver.Conn.HTTP2 do
       stream ->
         new_window = min(stream.send_window + increment, @max_window_size)
         stream = %{stream | send_window: new_window}
-        {:ok, %{conn | streams: Map.put(conn.streams, stream_id, stream)}, []}
+        conn = %{conn | streams: Map.put(conn.streams, stream_id, stream)}
+
+        if stream.pending_send != nil do
+          flush_pending_send(conn, stream_id)
+        else
+          {:ok, conn, []}
+        end
     end
   end
 
@@ -670,7 +745,92 @@ defmodule Quiver.Conn.HTTP2 do
     status_fragment ++ header_fragment
   end
 
-  # -- Flow control --
+  # -- Send-side flow control --
+
+  defp flush_pending_send(conn, stream_id) do
+    {conn, frames} = collect_pending_frames(conn, stream_id)
+
+    case frames do
+      [] ->
+        {:ok, conn, []}
+
+      _ ->
+        case conn.transport_mod.send(conn.transport, frames) do
+          {:ok, transport} -> {:ok, %{conn | transport: transport}, []}
+          {:error, transport, reason} -> {:error, %{conn | transport: transport}, reason}
+        end
+    end
+  end
+
+  defp collect_pending_frames(conn, stream_id) do
+    stream = Map.fetch!(conn.streams, stream_id)
+    body = stream.pending_send
+    max_frame = server_max_frame_size(conn)
+    allowed = min(conn.send_window, stream.send_window)
+    total = byte_size(body)
+
+    cond do
+      total <= allowed ->
+        frames = split_data_frames(stream_id, body, max_frame)
+
+        stream = %{
+          stream
+          | pending_send: nil,
+            send_window: stream.send_window - total,
+            state: :half_closed_local
+        }
+
+        conn = %{
+          conn
+          | send_window: conn.send_window - total,
+            streams: Map.put(conn.streams, stream_id, stream)
+        }
+
+        {conn, frames}
+
+      allowed > 0 ->
+        <<chunk::binary-size(allowed), rest::binary>> = body
+        frames = split_data_frames_no_end(stream_id, chunk, max_frame)
+        stream = %{stream | pending_send: rest, send_window: stream.send_window - allowed}
+
+        conn = %{
+          conn
+          | send_window: conn.send_window - allowed,
+            streams: Map.put(conn.streams, stream_id, stream)
+        }
+
+        {conn, frames}
+
+      true ->
+        {conn, []}
+    end
+  end
+
+  defp flush_all_pending_sends(conn) do
+    pending_stream_ids =
+      for {id, %{pending_send: ps}} <- conn.streams,
+          ps != nil,
+          do: id
+
+    {conn, all_frames} =
+      Enum.reduce(pending_stream_ids, {conn, []}, fn stream_id, {conn, acc} ->
+        {conn, frames} = collect_pending_frames(conn, stream_id)
+        {conn, [acc | frames]}
+      end)
+
+    case all_frames do
+      [] ->
+        {:ok, conn, []}
+
+      _ ->
+        case conn.transport_mod.send(conn.transport, all_frames) do
+          {:ok, transport} -> {:ok, %{conn | transport: transport}, []}
+          {:error, transport, reason} -> {:error, %{conn | transport: transport}, reason}
+        end
+    end
+  end
+
+  # -- Receive-side flow control --
 
   defp consume_recv_windows(conn, _stream_id, 0), do: conn
 
@@ -755,7 +915,7 @@ defmodule Quiver.Conn.HTTP2 do
           s.state in [:open, :half_closed_local],
           do: {:error, s.ref, error}
 
-    {:error, %{conn | state: :closed}, fragments}
+    {:error, %{conn | state: :closed, open_stream_count: 0}, fragments}
   end
 
   defp adjust_stream_windows(conn, 0), do: conn
@@ -796,7 +956,8 @@ defmodule Quiver.Conn.HTTP2 do
         %{
           conn
           | streams: Map.delete(conn.streams, stream_id),
-            ref_to_stream_id: Map.delete(conn.ref_to_stream_id, stream.ref)
+            ref_to_stream_id: Map.delete(conn.ref_to_stream_id, stream.ref),
+            open_stream_count: max(conn.open_stream_count - 1, 0)
         }
     end
   end
@@ -812,24 +973,42 @@ defmodule Quiver.Conn.HTTP2 do
   defp authority(%__MODULE__{host: host, port: 443}), do: host
   defp authority(%__MODULE__{host: host, port: port}), do: "#{host}:#{port}"
 
-  defp server_initial_window_size(%__MODULE__{server_settings: settings}) do
-    Map.get(settings, :initial_window_size, @default_initial_window_size)
+  defp server_initial_window_size(%__MODULE__{cached_initial_window_size: size}), do: size
+
+  defp server_max_frame_size(%__MODULE__{cached_max_frame_size: size}), do: size
+
+  defp split_data_frames(stream_id, body, max_size) when is_binary(body) do
+    if byte_size(body) <= max_size do
+      [Frame.encode_data(stream_id, body, true)]
+    else
+      do_split_data_frames(stream_id, body, max_size, true, [])
+    end
   end
 
-  defp server_max_frame_size(%__MODULE__{server_settings: settings}) do
-    Map.get(settings, :max_frame_size, @default_max_frame_size)
+  defp split_data_frames_no_end(stream_id, body, max_size) when is_binary(body) do
+    if byte_size(body) <= max_size do
+      [Frame.encode_data(stream_id, body, false)]
+    else
+      do_split_data_frames(stream_id, body, max_size, false, [])
+    end
   end
 
-  defp split_data_frames(_stream_id, <<>>, _max_size), do: []
+  defp do_split_data_frames(_stream_id, <<>>, _max_size, _end_stream, acc),
+    do: :lists.reverse(acc)
 
-  defp split_data_frames(stream_id, body, max_size) when byte_size(body) <= max_size do
-    [Frame.encode_data(stream_id, body, true)]
+  defp do_split_data_frames(stream_id, body, max_size, end_stream, acc)
+       when byte_size(body) <= max_size do
+    :lists.reverse([Frame.encode_data_sized(stream_id, body, byte_size(body), end_stream) | acc])
   end
 
-  defp split_data_frames(stream_id, body, max_size) do
+  defp do_split_data_frames(stream_id, body, max_size, end_stream, acc) do
     <<chunk::binary-size(max_size), rest::binary>> = body
-    [Frame.encode_data(stream_id, chunk, false) | split_data_frames(stream_id, rest, max_size)]
+    frame = Frame.encode_data_sized(stream_id, chunk, max_size, false)
+    do_split_data_frames(stream_id, rest, max_size, end_stream, [frame | acc])
   end
+
+  defp ensure_binary(data) when is_binary(data), do: data
+  defp ensure_binary(data), do: IO.iodata_to_binary(data)
 
   defp settings_to_pairs(settings) do
     Enum.map(settings, fn {key, value} ->
