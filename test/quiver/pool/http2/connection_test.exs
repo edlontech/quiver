@@ -253,7 +253,9 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
                  :post,
                  "/",
                  [{"content-type", "application/octet-stream"}],
-                 large_body, receive_timeout: 30_000)
+                 large_body,
+                 receive_timeout: 30_000
+               )
 
       assert response.status == 200
       assert response.body == "200000"
@@ -282,7 +284,9 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
               :post,
               "/",
               [{"content-type", "application/octet-stream"}],
-              body, receive_timeout: 30_000)
+              body,
+              receive_timeout: 30_000
+            )
           end)
         end
 

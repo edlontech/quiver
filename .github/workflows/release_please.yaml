@@ -17,6 +17,8 @@ jobs:
         elixir: ["1.19.4"]
         otp: ["28.3"]
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
     steps:
       - uses: actions/create-github-app-token@v2
         id: app-token
@@ -31,23 +33,92 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           release-type: elixir
 
+  benchmark:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created }}
+    strategy:
+      matrix:
+        elixir: ["1.19.4"]
+        otp: ["28.3"]
+        bench:
+          - concurrency
+          - payload
+          - pool_pressure
+          - streaming
+          - vs_finch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
-        if: ${{ steps.release.outputs.release_created }}
         with:
           elixir-version: ${{ matrix.elixir }}
           otp-version: ${{ matrix.otp }}
 
-      - name: Checkout
-        uses: actions/checkout@v4
-        if: ${{ steps.release.outputs.release_created }}
+      - name: Restore deps and _build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-mix-
 
       - name: Fetch and Compile Dependencies
-        if: ${{ steps.release.outputs.release_created }}
         run: |
           mix deps.get
           mix deps.compile
 
+      - name: Run benchmark
+        run: mix bench.${{ matrix.bench }}
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-${{ matrix.bench }}
+          path: guides/benchmarks/
+          retention-days: 1
+
+  publish:
+    needs: [release-please, benchmark]
+    if: ${{ needs.release-please.outputs.release_created }}
+    strategy:
+      matrix:
+        elixir: ["1.19.4"]
+        otp: ["28.3"]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - name: Restore deps and _build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-mix-
+
+      - name: Fetch and Compile Dependencies
+        run: |
+          mix deps.get
+          mix deps.compile
+
+      - name: Download benchmark results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: benchmark-*
+          path: guides/benchmarks/
+          merge-multiple: true
+
       - name: Publish to hex.pm
-        if: ${{ steps.release.outputs.release_created }}
         run: HEX_API_KEY=${{ secrets.HEX_API_KEY }} mix hex.publish --yes
