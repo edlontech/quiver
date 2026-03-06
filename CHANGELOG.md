@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.2](https://github.com/edlontech/quiver/compare/v0.1.1...v0.1.2) (2026-03-06)
+
+
+### Bug Fixes
+
+* Fixed connection leak in HTTP/2 ([a4b8798](https://github.com/edlontech/quiver/commit/a4b8798d0e5a25864c6ae6ffe18ed6e33abaffbe))
+* Fixed lower-case header for http/2, according to the RFC ([9d38e2c](https://github.com/edlontech/quiver/commit/9d38e2c7c28f7a2209856e1ea21dcae26938e1aa))
+* Improved HTTP/2 performance ([5fc4622](https://github.com/edlontech/quiver/commit/5fc46226d732aaba7c410358eeeddeae40e6c370))
+* Running benchmark on CI ([a59acda](https://github.com/edlontech/quiver/commit/a59acda50aa89661322f79a7cd804822751a7709))
+
 ## [0.1.1](https://github.com/edlontech/quiver/compare/v0.1.0...v0.1.1) (2026-03-05)
 
 
