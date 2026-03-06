@@ -283,7 +283,7 @@ defmodule Quiver.Conn.HTTP2 do
       {":authority", authority(conn)}
     ]
 
-    all_headers = pseudo_headers ++ headers
+    all_headers = pseudo_headers ++ Quiver.Utils.normalize_headers(headers)
     {encoded_headers, encode_table} = HPAX.encode(:store, all_headers, conn.encode_table)
     header_block = IO.iodata_to_binary(encoded_headers)
 

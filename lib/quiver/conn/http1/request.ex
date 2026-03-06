@@ -8,6 +8,7 @@ defmodule Quiver.Conn.HTTP1.Request do
   def encode(method, path, headers, body) do
     method_str = method |> Atom.to_string() |> String.upcase()
     request_line = [method_str, " ", path, " HTTP/1.1\r\n"]
+    headers = Quiver.Utils.normalize_headers(headers)
     headers = maybe_add_content_length(headers, body)
     header_lines = Enum.map(headers, fn {name, value} -> [name, ": ", value, "\r\n"] end)
 
@@ -29,7 +30,7 @@ defmodule Quiver.Conn.HTTP1.Request do
 
   defp has_content_length?(headers) do
     Enum.any?(headers, fn {name, _} ->
-      String.downcase(name) == "content-length"
+      name == "content-length"
     end)
   end
 end
