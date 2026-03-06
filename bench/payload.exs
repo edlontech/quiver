@@ -36,7 +36,6 @@ end
 {:ok, h2_pool} = Manager.get_pool(:bench_payload_h2, {:https, "127.0.0.1", h2_server.port})
 
 File.mkdir_p!("bench/output")
-File.mkdir_p!("guides/benchmarks")
 
 jobs =
   for {path, label} <- [{"/1kb", "1kb"}, {"/10kb", "10kb"}, {"/100kb", "100kb"}, {"/1mb", "1mb"}],
@@ -49,12 +48,14 @@ Benchee.run(
   jobs,
   warmup: 2,
   time: 10,
+  memory_time: 2,
+  reduction_time: 2,
   parallel: 20,
   formatters: [
-    Benchee.Formatters.Console,
-    {Benchee.Formatters.HTML, file: "bench/output/payload.html"},
-    {Benchee.Formatters.JSON, file: "bench/output/payload.json"},
-    {Benchee.Formatters.Markdown, file: "guides/benchmarks/payload.md"}
+    {Benchee.Formatters.Console, extended_statistics: true},
+    {Benchee.Formatters.HTML,
+     file: "guides/benchmarks/payload.html", auto_open: false, inline_assets: true},
+    {Benchee.Formatters.JSON, file: "bench/output/payload.json"}
   ]
 )
 

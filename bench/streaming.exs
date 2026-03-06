@@ -65,11 +65,14 @@ for {path, label} <- [{"/1kb", "1kb"}, {"/100kb", "100kb"}, {"/1mb", "1mb"}] do
     },
     warmup: 2,
     time: 10,
+    memory_time: 2,
+    reduction_time: 2,
     parallel: 10,
     formatters: [
-      Benchee.Formatters.Console,
-      {Benchee.Formatters.HTML, file: "bench/output/streaming_#{label}.html"},
-      {Benchee.Formatters.Markdown, file: "guides/benchmarks/streaming_#{label}.md"}
+      {Benchee.Formatters.Console, extended_statistics: true},
+      {Benchee.Formatters.HTML,
+       file: "guides/benchmarks/streaming_#{label}.html", auto_open: false, inline_assets: true},
+      {Benchee.Formatters.JSON, file: "bench/output/streaming_#{label}.json"}
     ]
   )
 end
@@ -97,11 +100,14 @@ Benchee.run(
   },
   warmup: 2,
   time: 10,
+  memory_time: 2,
+  reduction_time: 2,
   parallel: 10,
   formatters: [
-    Benchee.Formatters.Console,
-    {Benchee.Formatters.HTML, file: "bench/output/streaming_early_halt.html"},
-    {Benchee.Formatters.Markdown, file: "guides/benchmarks/streaming_early_halt.md"}
+    {Benchee.Formatters.Console, extended_statistics: true},
+    {Benchee.Formatters.HTML,
+     file: "guides/benchmarks/streaming_early_halt.html", auto_open: false, inline_assets: true},
+    {Benchee.Formatters.JSON, file: "bench/output/streaming_early_halt.json"}
   ]
 )
 

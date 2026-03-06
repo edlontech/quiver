@@ -40,12 +40,14 @@ Benchee.run(
   },
   warmup: 3,
   time: 15,
+  memory_time: 2,
+  reduction_time: 2,
   parallel: 50,
   formatters: [
-    Benchee.Formatters.Console,
-    {Benchee.Formatters.HTML, file: "bench/output/concurrency.html"},
-    {Benchee.Formatters.JSON, file: "bench/output/concurrency.json"},
-    {Benchee.Formatters.Markdown, file: "guides/benchmarks/concurrency.md"}
+    {Benchee.Formatters.Console, extended_statistics: true},
+    {Benchee.Formatters.HTML,
+     file: "guides/benchmarks/concurrency.html", auto_open: false, inline_assets: true},
+    {Benchee.Formatters.JSON, file: "bench/output/concurrency.json"}
   ]
 )
 

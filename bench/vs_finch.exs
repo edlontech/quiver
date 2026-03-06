@@ -3,12 +3,19 @@ alias Quiver.Pool.HTTP1
 alias Quiver.Pool.HTTP2
 alias Quiver.Pool.Manager
 
-sizes = %{"/1kb" => 1_024, "/100kb" => 102_400, "/1mb" => 1_048_576}
+response_sizes = %{"/1kb" => 1_024, "/100kb" => 102_400, "/1mb" => 1_048_576}
 
 handler = fn conn ->
-  size = Map.get(sizes, conn.request_path, 100)
+  {:ok, _body, conn} = Plug.Conn.read_body(conn)
+  size = Map.get(response_sizes, conn.request_path, 100)
   Plug.Conn.send_resp(conn, 200, :binary.copy("x", size))
 end
+
+payloads = %{
+  "1kb" => :binary.copy("x", 1_024),
+  "100kb" => :binary.copy("x", 102_400),
+  "1mb" => :binary.copy("x", 1_048_576)
+}
 
 {:ok, h1_server} = BenchServer.start_http1(handler)
 {:ok, h2_server} = BenchServer.start_http2(handler)
@@ -92,11 +99,68 @@ for {path, label} <- [{"/1kb", "1kb"}, {"/100kb", "100kb"}, {"/1mb", "1mb"}] do
     jobs,
     warmup: 2,
     time: 10,
+    memory_time: 2,
+    reduction_time: 2,
     parallel: 20,
     formatters: [
-      Benchee.Formatters.Console,
-      {Benchee.Formatters.HTML, file: "bench/output/vs_finch_#{label}.html"},
-      {Benchee.Formatters.Markdown, file: "guides/benchmarks/vs_finch_#{label}.md"}
+      {Benchee.Formatters.Console, extended_statistics: true},
+      {Benchee.Formatters.HTML,
+       file: "guides/benchmarks/vs_finch_#{label}.html", auto_open: false, inline_assets: true},
+      {Benchee.Formatters.JSON, file: "bench/output/vs_finch_#{label}.json"}
+    ]
+  )
+end
+
+## -- POST payload benchmarks --
+
+for {label, body} <- [
+      {"1kb", payloads["1kb"]},
+      {"100kb", payloads["100kb"]},
+      {"1mb", payloads["1mb"]}
+    ] do
+  IO.puts("\n--- POST #{label} payload (parallel: 20, h2 conns: 10 each) ---\n")
+
+  jobs = %{
+    "quiver http1" => fn ->
+      HTTP1.request(q_h1, :post, "/post", [{"content-type", "application/octet-stream"}], body)
+    end,
+    "quiver http2" => fn ->
+      HTTP2.request(q_h2, :post, "/post", [{"content-type", "application/octet-stream"}], body)
+    end,
+    "finch http1" => fn ->
+      Finch.build(
+        :post,
+        "http://127.0.0.1:#{h1_server.port}/post",
+        [{"content-type", "application/octet-stream"}],
+        body
+      )
+      |> Finch.request(FinchH1)
+    end,
+    "finch http2" => fn ->
+      Finch.build(
+        :post,
+        "https://127.0.0.1:#{h2_server.port}/post",
+        [{"content-type", "application/octet-stream"}],
+        body
+      )
+      |> Finch.request(FinchH2)
+    end
+  }
+
+  Benchee.run(
+    jobs,
+    warmup: 2,
+    time: 10,
+    memory_time: 2,
+    reduction_time: 2,
+    parallel: 20,
+    formatters: [
+      {Benchee.Formatters.Console, extended_statistics: true},
+      {Benchee.Formatters.HTML,
+       file: "guides/benchmarks/vs_finch_post_#{label}.html",
+       auto_open: false,
+       inline_assets: true},
+      {Benchee.Formatters.JSON, file: "bench/output/vs_finch_post_#{label}.json"}
     ]
   )
 end

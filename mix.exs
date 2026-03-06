@@ -29,19 +29,20 @@ defmodule Quiver.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
+      mod: {Quiver.Application, []},
       extra_applications: [:logger, :ssl, :public_key]
     ]
   end
 
   defp docs do
     benchmark_extras =
-      "guides/benchmarks/*.md"
+      "guides/benchmarks/*.html"
       |> Path.wildcard()
       |> Enum.sort()
       |> Enum.map(fn path ->
         name =
           path
-          |> Path.basename(".md")
+          |> Path.basename(".html")
           |> String.replace("_", " ")
           |> String.split()
           |> Enum.map_join(" ", &String.capitalize/1)
@@ -135,7 +136,6 @@ defmodule Quiver.MixProject do
       {:benchee, "~> 1.0", only: :dev},
       {:benchee_html, "~> 1.0", only: :dev},
       {:benchee_json, "~> 1.0", only: :dev},
-      {:benchee_markdown, "~> 0.3", only: :dev},
       {:finch, "~> 0.21", only: :dev},
       {:castore, "~> 1.0"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
@@ -154,6 +154,7 @@ defmodule Quiver.MixProject do
       {:telemetry, "~> 1.0"},
       {:tesla, "~> 1.16", optional: true},
       {:testcontainers, "~> 1.13", only: [:test, :dev]},
+      {:tidewave, "~> 0.5", only: :dev, runtime: false},
       {:typedstruct, "~> 0.5"},
       {:zoi, "~> 0.11"}
     ]
