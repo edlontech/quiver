@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/edlontech/quiver/compare/v0.1.2...v0.1.3) (2026-03-06)
+
+
+### Bug Fixes
+
+* Using markdown benchee ([a05bcea](https://github.com/edlontech/quiver/commit/a05bceae3d2d300b145899edc829918298e1bad7))
+
 ## [0.1.2](https://github.com/edlontech/quiver/compare/v0.1.1...v0.1.2) (2026-03-06)
 
 
