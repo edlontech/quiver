@@ -53,8 +53,7 @@ Benchee.run(
   parallel: 20,
   formatters: [
     {Benchee.Formatters.Console, extended_statistics: true},
-    {Benchee.Formatters.HTML,
-     file: "guides/benchmarks/payload.html", auto_open: false, inline_assets: true},
+    {Benchee.Formatters.Markdown, file: "guides/benchmarks/payload.md"},
     {Benchee.Formatters.JSON, file: "bench/output/payload.json"}
   ]
 )

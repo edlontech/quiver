@@ -104,8 +104,7 @@ for {path, label} <- [{"/1kb", "1kb"}, {"/100kb", "100kb"}, {"/1mb", "1mb"}] do
     parallel: 20,
     formatters: [
       {Benchee.Formatters.Console, extended_statistics: true},
-      {Benchee.Formatters.HTML,
-       file: "guides/benchmarks/vs_finch_#{label}.html", auto_open: false, inline_assets: true},
+      {Benchee.Formatters.Markdown, file: "guides/benchmarks/vs_finch_#{label}.md"},
       {Benchee.Formatters.JSON, file: "bench/output/vs_finch_#{label}.json"}
     ]
   )
@@ -156,10 +155,7 @@ for {label, body} <- [
     parallel: 20,
     formatters: [
       {Benchee.Formatters.Console, extended_statistics: true},
-      {Benchee.Formatters.HTML,
-       file: "guides/benchmarks/vs_finch_post_#{label}.html",
-       auto_open: false,
-       inline_assets: true},
+      {Benchee.Formatters.Markdown, file: "guides/benchmarks/vs_finch_post_#{label}.md"},
       {Benchee.Formatters.JSON, file: "bench/output/vs_finch_post_#{label}.json"}
     ]
   )

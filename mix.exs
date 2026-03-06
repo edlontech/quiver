@@ -36,13 +36,13 @@ defmodule Quiver.MixProject do
 
   defp docs do
     benchmark_extras =
-      "guides/benchmarks/*.html"
+      "guides/benchmarks/*.md"
       |> Path.wildcard()
       |> Enum.sort()
       |> Enum.map(fn path ->
         name =
           path
-          |> Path.basename(".html")
+          |> Path.basename(".md")
           |> String.replace("_", " ")
           |> String.split()
           |> Enum.map_join(" ", &String.capitalize/1)
@@ -134,7 +134,7 @@ defmodule Quiver.MixProject do
       {:assert_eventually, "~> 1.0", only: :test},
       {:bandit, "~> 1.0", only: [:dev, :test]},
       {:benchee, "~> 1.0", only: :dev},
-      {:benchee_html, "~> 1.0", only: :dev},
+      {:benchee_markdown, "~> 0.3", only: :dev},
       {:benchee_json, "~> 1.0", only: :dev},
       {:finch, "~> 0.21", only: :dev},
       {:castore, "~> 1.0"},

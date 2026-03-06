@@ -45,8 +45,7 @@ Benchee.run(
   parallel: 50,
   formatters: [
     {Benchee.Formatters.Console, extended_statistics: true},
-    {Benchee.Formatters.HTML,
-     file: "guides/benchmarks/concurrency.html", auto_open: false, inline_assets: true},
+    {Benchee.Formatters.Markdown, file: "guides/benchmarks/concurrency.md"},
     {Benchee.Formatters.JSON, file: "bench/output/concurrency.json"}
   ]
 )
