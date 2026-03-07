@@ -170,13 +170,15 @@ defmodule Quiver.MixProject do
       "bench.profile_payload": ["run bench/profile_payload.exs"],
       "bench.streaming": ["run bench/streaming.exs"],
       "bench.vs_finch": ["run bench/vs_finch.exs"],
+      "bench.vs_tesla": ["run bench/vs_tesla.exs"],
       "bench.all": [
         "bench.concurrency",
         "bench.payload",
         "bench.pool_pressure",
         "bench.profile_payload",
         "bench.streaming",
-        "bench.vs_finch"
+        "bench.vs_finch",
+        "bench.vs_tesla"
       ]
     ]
   end
