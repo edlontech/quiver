@@ -3,6 +3,8 @@ defmodule Quiver.Conn.HTTP2Test do
   @moduletag :integration
 
   alias Quiver.Conn.HTTP2, as: Conn
+  alias Quiver.Conn.HTTP2.Frame
+  alias Quiver.Error.GoAwayUnprocessed
   alias Quiver.TestServer
 
   describe "connect/2" do
@@ -549,6 +551,274 @@ defmodule Quiver.Conn.HTTP2Test do
 
       assert {:ok, conn, %Quiver.Response{status: 200, body: "alpha:beta"}} =
                Conn.request(conn, :get, "/", [{"x-a", "alpha"}, {"x-b", "beta"}], nil)
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+  end
+
+  describe "trailer headers" do
+    test "second HEADERS frame with end_stream emits trailers fragment" do
+      handler = fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("trailer", "x-checksum")
+        |> Plug.Conn.send_resp(200, "body")
+      end
+
+      {:ok, conn, server} = connect_h2(handler)
+
+      {:ok, conn, ref} = Conn.open_request(conn, :get, "/", [], nil)
+      {_conn, fragments} = recv_stream_loop(conn, [])
+
+      assert Enum.any?(fragments, &match?({:status, ^ref, 200}, &1))
+      assert Enum.any?(fragments, &match?({:done, ^ref}, &1))
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+
+    test "trailers in blocking request populate response trailers field" do
+      {:ok, conn, server} = connect_h2()
+
+      {:ok, conn, %Quiver.Response{trailers: trailers}} =
+        Conn.request(conn, :get, "/", [], nil)
+
+      assert is_list(trailers)
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+
+    test "process_decoded_headers distinguishes trailers from initial headers" do
+      {:ok, conn, server} = connect_h2()
+
+      {:ok, conn, ref} = Conn.open_request(conn, :get, "/", [], nil)
+
+      stream_id = Map.get(conn.ref_to_stream_id, ref)
+      stream = Map.get(conn.streams, stream_id)
+      assert stream.received_headers? == false
+
+      {_conn, _fragments} = recv_stream_loop(conn, [])
+
+      TestServer.stop(server)
+    end
+
+    test "trailer HEADERS without END_STREAM is a protocol error" do
+      handler = fn conn ->
+        Process.sleep(500)
+        Plug.Conn.send_resp(conn, 200, "ok")
+      end
+
+      {:ok, conn, server} = connect_h2(handler)
+
+      {:ok, conn, ref} = Conn.open_request(conn, :get, "/", [], nil)
+      stream_id = Map.get(conn.ref_to_stream_id, ref)
+
+      {initial_headers_block, decode_table} =
+        HPAX.encode(:store, [{":status", "200"}], conn.decode_table)
+
+      initial_headers_frame =
+        Frame.encode_headers(stream_id, IO.iodata_to_binary(initial_headers_block), true, false)
+        |> IO.iodata_to_binary()
+
+      {:ok, conn, _fragments} =
+        Conn.stream(
+          %{conn | decode_table: decode_table},
+          {:ssl, conn.transport.socket, initial_headers_frame}
+        )
+
+      stream = Map.get(conn.streams, stream_id)
+      assert stream.received_headers? == true
+
+      {trailer_block, _decode_table} =
+        HPAX.encode(:store, [{"x-checksum", "abc"}], conn.decode_table)
+
+      trailer_frame =
+        Frame.encode_headers(stream_id, IO.iodata_to_binary(trailer_block), true, false)
+        |> IO.iodata_to_binary()
+
+      assert {:error, conn, _fragments} =
+               Conn.stream(conn, {:ssl, conn.transport.socket, trailer_frame})
+
+      assert conn.state == :closed
+
+      TestServer.stop(server)
+    end
+  end
+
+  describe "GOAWAY unprocessed stream detection" do
+    test "streams above last_stream_id get GoAwayUnprocessed (transient)" do
+      handler = fn conn ->
+        Process.sleep(500)
+        Plug.Conn.send_resp(conn, 200, "ok")
+      end
+
+      {:ok, conn, server} = connect_h2(handler)
+
+      {:ok, conn, _ref1} = Conn.open_request(conn, :get, "/a", [], nil)
+      {:ok, conn, ref2} = Conn.open_request(conn, :get, "/b", [], nil)
+
+      goaway_frame =
+        Frame.encode_goaway(1, :no_error, "shutting down")
+        |> IO.iodata_to_binary()
+
+      {:ok, conn, fragments} = Conn.stream(conn, {:ssl, conn.transport.socket, goaway_frame})
+
+      error_fragments = for {:error, ref, err} <- fragments, do: {ref, err}
+      assert length(error_fragments) == 1
+
+      [{error_ref, error}] = error_fragments
+      assert error_ref == ref2
+      assert %GoAwayUnprocessed{} = error
+      assert error.last_stream_id == 1
+      assert error.error_code == :no_error
+      assert error.debug_data == "shutting down"
+
+      assert error.class == :transient
+
+      assert conn.state == :goaway
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+
+    test "streams at or below last_stream_id are not errored" do
+      handler = fn conn ->
+        Process.sleep(500)
+        Plug.Conn.send_resp(conn, 200, "ok")
+      end
+
+      {:ok, conn, server} = connect_h2(handler)
+
+      {:ok, conn, ref1} = Conn.open_request(conn, :get, "/a", [], nil)
+      {:ok, conn, _ref2} = Conn.open_request(conn, :get, "/b", [], nil)
+
+      goaway_frame =
+        Frame.encode_goaway(3, :no_error, "")
+        |> IO.iodata_to_binary()
+
+      {:ok, conn, fragments} = Conn.stream(conn, {:ssl, conn.transport.socket, goaway_frame})
+
+      error_refs = for {:error, ref, _err} <- fragments, do: ref
+      refute ref1 in error_refs
+
+      assert conn.state == :goaway
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+
+    test "GoAwayUnprocessed contains correct error_code and debug_data" do
+      handler = fn conn ->
+        Process.sleep(500)
+        Plug.Conn.send_resp(conn, 200, "ok")
+      end
+
+      {:ok, conn, server} = connect_h2(handler)
+
+      {:ok, conn, _ref1} = Conn.open_request(conn, :get, "/a", [], nil)
+      {:ok, conn, ref2} = Conn.open_request(conn, :get, "/b", [], nil)
+
+      goaway_frame =
+        Frame.encode_goaway(1, :enhance_your_calm, "too fast")
+        |> IO.iodata_to_binary()
+
+      {:ok, conn, fragments} = Conn.stream(conn, {:ssl, conn.transport.socket, goaway_frame})
+
+      [{^ref2, error}] = for {:error, ref, err} <- fragments, do: {ref, err}
+      assert %GoAwayUnprocessed{} = error
+      assert error.error_code == :enhance_your_calm
+      assert error.debug_data == "too fast"
+      assert error.last_stream_id == 1
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+  end
+
+  describe "MAX_HEADER_LIST_SIZE enforcement" do
+    test "returns error when header list exceeds server max_header_list_size" do
+      {:ok, conn, server} = connect_h2()
+
+      conn = put_in(conn.server_settings[:max_header_list_size], 100)
+
+      large_headers = [{"x-large", String.duplicate("a", 200)}]
+
+      assert {:error, _conn, %Quiver.Error.HeaderListTooLarge{} = error} =
+               Conn.open_request(conn, :get, "/", large_headers, nil)
+
+      assert error.size > 100
+      assert error.max_size == 100
+
+      TestServer.stop(server)
+    end
+
+    test "succeeds when header list is within server max_header_list_size" do
+      {:ok, conn, server} = connect_h2()
+
+      conn = put_in(conn.server_settings[:max_header_list_size], 10_000)
+
+      assert {:ok, _conn, ref} = Conn.open_request(conn, :get, "/", [], nil)
+      assert is_reference(ref)
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+
+    test "allows any header size when max_header_list_size is not set" do
+      {:ok, conn, server} = connect_h2()
+
+      conn = %{conn | server_settings: Map.delete(conn.server_settings, :max_header_list_size)}
+
+      large_headers = [{"x-huge", String.duplicate("b", 50_000)}]
+
+      assert {:ok, _conn, ref} = Conn.open_request(conn, :get, "/", large_headers, nil)
+      assert is_reference(ref)
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+
+    test "prepare_request also enforces max_header_list_size" do
+      {:ok, conn, server} = connect_h2()
+
+      conn = put_in(conn.server_settings[:max_header_list_size], 100)
+
+      large_headers = [{"x-large", String.duplicate("c", 200)}]
+
+      assert {:error, _conn, %Quiver.Error.HeaderListTooLarge{}} =
+               Conn.prepare_request(conn, :get, "/", large_headers, nil)
+
+      TestServer.stop(server)
+    end
+
+    test "header list size calculation includes 32-byte per-entry overhead" do
+      {:ok, conn, server} = connect_h2()
+
+      pseudo_overhead = 4 * 32
+
+      pseudo_sizes =
+        byte_size(":method") + byte_size("GET") +
+          byte_size(":path") + byte_size("/") +
+          byte_size(":scheme") + byte_size("https") +
+          byte_size(":authority") + byte_size("127.0.0.1:#{conn.port}")
+
+      expected_base = pseudo_sizes + pseudo_overhead
+
+      header_name = "x-test"
+      header_value = "v"
+      header_entry_size = byte_size(header_name) + byte_size(header_value) + 32
+      total = expected_base + header_entry_size
+
+      conn = put_in(conn.server_settings[:max_header_list_size], total - 1)
+
+      assert {:error, _conn, %Quiver.Error.HeaderListTooLarge{size: ^total}} =
+               Conn.open_request(conn, :get, "/", [{header_name, header_value}], nil)
+
+      conn = put_in(conn.server_settings[:max_header_list_size], total)
+
+      assert {:ok, _conn, _ref} =
+               Conn.open_request(conn, :get, "/", [{header_name, header_value}], nil)
 
       Conn.close(conn)
       TestServer.stop(server)

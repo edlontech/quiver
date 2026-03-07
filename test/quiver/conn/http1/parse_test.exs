@@ -146,6 +146,83 @@ defmodule Quiver.Conn.HTTP1.ParseTest do
     end
   end
 
+  describe "parse/2 - 1xx informational responses" do
+    test "100 Continue is consumed and parser waits for real response" do
+      data = "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+      {fragments, state, rest} = Parse.parse(data, :status)
+
+      assert fragments == []
+      assert state == :status
+      assert rest == "HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"
+
+      {fragments2, state2, rest2} = Parse.parse(rest, state)
+      assert {:status, 200} in fragments2
+      refute Enum.any?(fragments2, &match?({:status, 100}, &1))
+      assert state2 == {:headers, 200, []}
+      assert rest2 == "content-length: 2\r\n\r\nok"
+    end
+
+    test "103 Early Hints with headers is consumed before real response" do
+      data =
+        "HTTP/1.1 103 Early Hints\r\nlink: </style.css>; rel=preload\r\n\r\n" <>
+          "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nhello"
+
+      {fragments, state, rest} = Parse.parse(data, :status)
+
+      assert fragments == []
+      assert state == :status
+      assert rest == "HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\nhello"
+    end
+
+    test "multiple 1xx responses before final response" do
+      data = "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 102 Processing\r\n\r\n"
+      {fragments, state, rest} = Parse.parse(data, :status)
+
+      assert fragments == []
+      assert state == :status
+      assert rest == "HTTP/1.1 102 Processing\r\n\r\n"
+
+      {fragments2, state2, rest2} = Parse.parse(rest, state)
+      assert fragments2 == []
+      assert state2 == :status
+      assert rest2 == ""
+    end
+
+    test "101 Switching Protocols is not discarded" do
+      data = "HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\n\r\n"
+      {fragments, state, rest} = Parse.parse(data, :status)
+
+      assert {:status, 101} in fragments
+      assert state == {:headers, 101, []}
+      assert rest == "upgrade: websocket\r\n\r\n"
+
+      {fragments2, state2, rest2} = Parse.parse(rest, state)
+      assert {:headers, [{"upgrade", "websocket"}]} in fragments2
+      assert state2 == :body_until_close
+      assert rest2 == ""
+    end
+
+    test "incomplete 1xx status line waits for more data" do
+      {fragments, state, rest} = Parse.parse("HTTP/1.1 100", :status)
+
+      assert fragments == []
+      assert state == :status
+      assert rest == "HTTP/1.1 100"
+    end
+
+    test "incomplete 1xx headers wait for more data" do
+      {fragments, state, rest} = Parse.parse("HTTP/1.1 100 Continue\r\n", :status)
+
+      assert fragments == []
+      assert state == {:headers, 100, []}
+      assert rest == ""
+
+      {fragments2, state2, _rest2} = Parse.parse("some-header: val\r\n", state)
+      assert fragments2 == []
+      assert {:headers, 100, [{"some-header", "val"}]} = state2
+    end
+  end
+
   describe "parse/2 - body content-length" do
     test "parses complete body in one call" do
       {fragments, state, rest} =
@@ -248,8 +325,39 @@ defmodule Quiver.Conn.HTTP1.ParseTest do
       assert [{:data, "hello"}, :done] = fragments
     end
 
-    test "skips trailer headers after terminating chunk" do
+    test "emits trailer headers after terminating chunk" do
       data = "0\r\nx-checksum: abc123\r\n\r\n"
+      {fragments, state, rest} = Parse.parse(data, {:body_chunked, :chunk_size})
+
+      assert [{:trailers, [{"x-checksum", "abc123"}]}, :done] = fragments
+      assert state == :idle
+      assert rest == ""
+    end
+
+    test "emits multiple trailer headers" do
+      data = "0\r\nx-checksum: abc123\r\nx-timing: 42ms\r\n\r\n"
+      {fragments, state, rest} = Parse.parse(data, {:body_chunked, :chunk_size})
+
+      assert [{:trailers, trailers}, :done] = fragments
+      assert {"x-checksum", "abc123"} in trailers
+      assert {"x-timing", "42ms"} in trailers
+      assert state == :idle
+      assert rest == ""
+    end
+
+    test "filters forbidden trailer fields" do
+      data =
+        "0\r\ntransfer-encoding: chunked\r\ncontent-length: 5\r\nhost: evil\r\nx-checksum: abc\r\n\r\n"
+
+      {fragments, state, rest} = Parse.parse(data, {:body_chunked, :chunk_size})
+
+      assert [{:trailers, [{"x-checksum", "abc"}]}, :done] = fragments
+      assert state == :idle
+      assert rest == ""
+    end
+
+    test "no trailers emits only done" do
+      data = "0\r\n\r\n"
       {fragments, state, rest} = Parse.parse(data, {:body_chunked, :chunk_size})
 
       assert [:done] = fragments
@@ -286,13 +394,13 @@ defmodule Quiver.Conn.HTTP1.ParseTest do
         Parse.parse("0\r\nx-checksum: abc", {:body_chunked, :chunk_size})
 
       assert fragments1 == []
-      assert state1 == {:body_chunked, :chunk_trailers}
+      assert {:body_chunked, {:chunk_trailers, []}} = state1
       assert rest1 == "x-checksum: abc"
 
       {fragments2, state2, rest2} =
         Parse.parse(rest1 <> "123\r\n\r\n", state1)
 
-      assert [:done] = fragments2
+      assert [{:trailers, [{"x-checksum", "abc123"}]}, :done] = fragments2
       assert state2 == :idle
       assert rest2 == ""
     end

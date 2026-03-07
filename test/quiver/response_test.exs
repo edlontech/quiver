@@ -15,12 +15,19 @@ defmodule Quiver.ResponseTest do
       response = %Response{
         status: 200,
         headers: [{"content-type", "text/html"}],
-        body: "<html></html>"
+        body: "<html></html>",
+        trailers: [{"x-checksum", "abc123"}]
       }
 
       assert response.status == 200
       assert response.headers == [{"content-type", "text/html"}]
       assert response.body == "<html></html>"
+      assert response.trailers == [{"x-checksum", "abc123"}]
+    end
+
+    test "trailers field defaults to empty list" do
+      response = %Response{status: 200}
+      assert response.trailers == []
     end
 
     test "enforces status field" do

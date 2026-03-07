@@ -13,6 +13,8 @@ defmodule Quiver.Conn.HTTP2.Frame do
       +-----------------------------------------------+
   """
 
+  alias Quiver.Conn.HTTP2.Errors
+
   import Bitwise
 
   @frame_header_size 9
@@ -88,7 +90,7 @@ defmodule Quiver.Conn.HTTP2.Frame do
 
   # RST_STREAM (0x3)
   defp decode_payload(@rst_stream, _flags, stream_id, <<error_code::32>>) do
-    {:ok, {:rst_stream, stream_id, error_code}}
+    {:ok, {:rst_stream, stream_id, Errors.decode(error_code)}}
   end
 
   defp decode_payload(@rst_stream, _flags, _stream_id, _payload) do
@@ -148,7 +150,7 @@ defmodule Quiver.Conn.HTTP2.Frame do
          0,
          <<_r::1, last_stream_id::31, error_code::32, debug::binary>>
        ) do
-    {:ok, {:goaway, last_stream_id, error_code, debug}}
+    {:ok, {:goaway, last_stream_id, Errors.decode(error_code), debug}}
   end
 
   defp decode_payload(@goaway, _flags, 0, _payload), do: {:error, :frame_size_error}
@@ -234,16 +236,19 @@ defmodule Quiver.Conn.HTTP2.Frame do
   end
 
   @doc false
-  @spec encode_goaway(non_neg_integer(), non_neg_integer(), binary()) :: iodata()
+  @spec encode_goaway(non_neg_integer(), Errors.error_code() | non_neg_integer(), binary()) ::
+          iodata()
   def encode_goaway(last_stream_id, error_code, debug_data) do
-    payload = [<<0::1, last_stream_id::31, error_code::32>>, debug_data]
+    code = Errors.encode(error_code)
+    payload = [<<0::1, last_stream_id::31, code::32>>, debug_data]
     encode_frame(@goaway, 0, 0, payload)
   end
 
   @doc false
-  @spec encode_rst_stream(non_neg_integer(), non_neg_integer()) :: iodata()
+  @spec encode_rst_stream(non_neg_integer(), Errors.error_code() | non_neg_integer()) :: iodata()
   def encode_rst_stream(stream_id, error_code) do
-    encode_frame(@rst_stream, 0, stream_id, <<error_code::32>>)
+    code = Errors.encode(error_code)
+    encode_frame(@rst_stream, 0, stream_id, <<code::32>>)
   end
 
   @doc false

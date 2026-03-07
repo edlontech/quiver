@@ -52,6 +52,19 @@ defmodule Quiver.Error.InvalidPoolOpts do
   end
 end
 
+defmodule Quiver.Error.HeaderListTooLarge do
+  @moduledoc """
+  Outgoing header list exceeds the server-advertised MAX_HEADER_LIST_SIZE (RFC 9113 Section 6.5.2).
+  """
+
+  use Splode.Error, fields: [:size, :max_size], class: :invalid
+  @type t :: Splode.Error.t()
+
+  def message(%{size: size, max_size: max_size}) do
+    "header list size #{size} exceeds server max #{max_size}"
+  end
+end
+
 defmodule Quiver.Error.InvalidPoolRule do
   @moduledoc """
   Pool config key could not be parsed as a valid origin pattern.

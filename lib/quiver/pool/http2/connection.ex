@@ -180,6 +180,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
           phase: :awaiting_headers,
           status: nil,
           headers: [],
+          trailers: [],
           pending_data: :queue.new(),
           demand_pid: nil,
           idle_timer: nil
@@ -430,7 +431,8 @@ defmodule Quiver.Pool.HTTP2.Connection do
     end
   end
 
-  defp dispatch_fragment(data, {type, ref, value}) when type in [:status, :headers, :data] do
+  defp dispatch_fragment(data, {type, ref, value})
+       when type in [:status, :headers, :data, :trailers] do
     case Map.get(data.requests, ref) do
       nil ->
         data
@@ -451,6 +453,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
   defp finish_streaming_done(data, ref, %{demand_pid: pid} = req, requests) when pid != nil do
     cancel_idle_timer(req)
     Process.demonitor(req.monitor, [:flush])
+    if req.trailers != [], do: send(pid, {:trailers, ref, req.trailers})
     send(pid, {:done, ref})
     if data.pool_pid, do: send(data.pool_pid, {:stream_done, self()})
     %{data | requests: requests, monitors: Map.delete(data.monitors, req.monitor)}
@@ -497,6 +500,10 @@ defmodule Quiver.Pool.HTTP2.Connection do
     end
   end
 
+  defp dispatch_streaming_body_phase(data, ref, req, :trailers, value) do
+    put_in(data.requests[ref], %{req | trailers: value})
+  end
+
   defp dispatch_streaming_body_phase(data, _ref, _req, _type, _value), do: data
 
   defp handle_demand(ref, consumer_pid, data, current_state) do
@@ -517,6 +524,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
   defp demand_finish_stream(ref, consumer_pid, req, data, current_state) do
     Process.demonitor(req.monitor, [:flush])
+    if req.trailers != [], do: send(consumer_pid, {:trailers, ref, req.trailers})
     send(consumer_pid, {:done, ref})
     if data.pool_pid, do: send(data.pool_pid, {:stream_done, self()})
     monitors = Map.delete(data.monitors, req.monitor)
@@ -644,15 +652,16 @@ defmodule Quiver.Pool.HTTP2.Connection do
   defp cancel_idle_timer(_), do: :ok
 
   defp assemble_response(fragments) do
-    {status, headers, chunks} =
-      Enum.reduce(fragments, {nil, [], []}, fn
-        {:status, s}, {_, h, c} -> {s, h, c}
-        {:headers, h}, {s, hs, c} -> {s, hs ++ h, c}
-        {:data, d}, {s, h, cs} -> {s, h, [d | cs]}
+    {status, headers, trailers, chunks} =
+      Enum.reduce(fragments, {nil, [], [], []}, fn
+        {:status, s}, {_, h, t, c} -> {s, h, t, c}
+        {:headers, h}, {s, hs, t, c} -> {s, hs ++ h, t, c}
+        {:trailers, t}, {s, h, _, c} -> {s, h, t, c}
+        {:data, d}, {s, h, t, cs} -> {s, h, t, [d | cs]}
       end)
 
     body = if chunks == [], do: nil, else: IO.iodata_to_binary(:lists.reverse(chunks))
 
-    %Response{status: status, headers: headers, body: body}
+    %Response{status: status, headers: headers, body: body, trailers: trailers}
   end
 end

@@ -57,11 +57,18 @@ defmodule Quiver.Conn.HTTP2.FrameTest do
       assert {:error, :frame_size_error} = Frame.decode(frame)
     end
 
-    test "decodes RST_STREAM frame" do
+    test "decodes RST_STREAM frame with known error code as atom" do
       payload = <<0x8::32>>
       frame = encode_raw(0x3, 0x0, 1, payload)
 
-      assert {:ok, {:rst_stream, 1, 0x8}, ""} = Frame.decode(frame)
+      assert {:ok, {:rst_stream, 1, :cancel}, ""} = Frame.decode(frame)
+    end
+
+    test "decodes RST_STREAM frame with unknown error code" do
+      payload = <<0xFF::32>>
+      frame = encode_raw(0x3, 0x0, 1, payload)
+
+      assert {:ok, {:rst_stream, 1, {:unknown, 0xFF}}, ""} = Frame.decode(frame)
     end
 
     test "returns error for invalid RST_STREAM size" do
@@ -131,18 +138,25 @@ defmodule Quiver.Conn.HTTP2.FrameTest do
       assert {:error, :protocol_error} = Frame.decode(frame)
     end
 
-    test "decodes GOAWAY frame" do
+    test "decodes GOAWAY frame with known error code as atom" do
       payload = <<0::1, 7::31, 0x0::32, "debug">>
       frame = encode_raw(0x7, 0x0, 0, payload)
 
-      assert {:ok, {:goaway, 7, 0x0, "debug"}, ""} = Frame.decode(frame)
+      assert {:ok, {:goaway, 7, :no_error, "debug"}, ""} = Frame.decode(frame)
     end
 
     test "decodes GOAWAY with empty debug data" do
       payload = <<0::1, 0::31, 0x0::32>>
       frame = encode_raw(0x7, 0x0, 0, payload)
 
-      assert {:ok, {:goaway, 0, 0x0, ""}, ""} = Frame.decode(frame)
+      assert {:ok, {:goaway, 0, :no_error, ""}, ""} = Frame.decode(frame)
+    end
+
+    test "decodes GOAWAY with unknown error code" do
+      payload = <<0::1, 0::31, 0xFE::32, "err">>
+      frame = encode_raw(0x7, 0x0, 0, payload)
+
+      assert {:ok, {:goaway, 0, {:unknown, 0xFE}, "err"}, ""} = Frame.decode(frame)
     end
 
     test "returns error for GOAWAY on non-zero stream" do
@@ -278,14 +292,24 @@ defmodule Quiver.Conn.HTTP2.FrameTest do
       assert {:ok, {:ping, :ack, ^opaque}, ""} = Frame.decode(encoded)
     end
 
-    test "GOAWAY frame" do
-      encoded = Frame.encode_goaway(10, 0x0, "no error") |> IO.iodata_to_binary()
-      assert {:ok, {:goaway, 10, 0x0, "no error"}, ""} = Frame.decode(encoded)
+    test "GOAWAY frame with atom error code" do
+      encoded = Frame.encode_goaway(10, :no_error, "no error") |> IO.iodata_to_binary()
+      assert {:ok, {:goaway, 10, :no_error, "no error"}, ""} = Frame.decode(encoded)
     end
 
-    test "RST_STREAM frame" do
+    test "GOAWAY frame with integer error code" do
+      encoded = Frame.encode_goaway(10, 0x0, "no error") |> IO.iodata_to_binary()
+      assert {:ok, {:goaway, 10, :no_error, "no error"}, ""} = Frame.decode(encoded)
+    end
+
+    test "RST_STREAM frame with atom error code" do
+      encoded = Frame.encode_rst_stream(3, :cancel) |> IO.iodata_to_binary()
+      assert {:ok, {:rst_stream, 3, :cancel}, ""} = Frame.decode(encoded)
+    end
+
+    test "RST_STREAM frame with integer error code" do
       encoded = Frame.encode_rst_stream(3, 0x8) |> IO.iodata_to_binary()
-      assert {:ok, {:rst_stream, 3, 0x8}, ""} = Frame.decode(encoded)
+      assert {:ok, {:rst_stream, 3, :cancel}, ""} = Frame.decode(encoded)
     end
 
     test "CONTINUATION frame" do

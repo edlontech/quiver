@@ -10,6 +10,8 @@ defmodule Quiver.Conn.HTTP1.Parse do
   alias Quiver.Error.MalformedHeaders
   alias Quiver.Error.ProtocolViolation
 
+  defguardp is_informational(status) when status >= 100 and status < 200 and status != 101
+
   @type parse_state ::
           :idle
           | :status
@@ -19,11 +21,15 @@ defmodule Quiver.Conn.HTTP1.Parse do
           | :body_until_close
 
   @type chunk_state ::
-          :chunk_size | {:chunk_data, non_neg_integer()} | :chunk_crlf | :chunk_trailers
+          :chunk_size
+          | {:chunk_data, non_neg_integer()}
+          | :chunk_crlf
+          | {:chunk_trailers, [{String.t(), String.t()}]}
 
   @type response_fragment ::
           {:status, non_neg_integer()}
           | {:headers, [{String.t(), String.t()}]}
+          | {:trailers, [{String.t(), String.t()}]}
           | {:data, binary()}
           | :done
 
@@ -35,6 +41,9 @@ defmodule Quiver.Conn.HTTP1.Parse do
     case find_line(data) do
       {:ok, line, rest} ->
         case parse_status_line(line) do
+          {:ok, status} when is_informational(status) ->
+            parse(rest, {:headers, status, []})
+
           {:ok, status} ->
             {[{:status, status}], {:headers, status, []}, rest}
 
@@ -50,18 +59,7 @@ defmodule Quiver.Conn.HTTP1.Parse do
   def parse(data, {:headers, status, acc}) do
     case find_line(data) do
       {:ok, "", rest} ->
-        headers = Enum.reverse(acc)
-
-        case select_body_mode(status, headers) do
-          {:error, _} = error ->
-            error
-
-          :idle ->
-            {[{:headers, headers}, :done], :idle, rest}
-
-          state ->
-            {[{:headers, headers}], state, rest}
-        end
+        complete_headers(status, acc, rest)
 
       {:ok, line, rest} ->
         case parse_header(line) do
@@ -130,16 +128,25 @@ defmodule Quiver.Conn.HTTP1.Parse do
     {[], {:body_chunked, :chunk_crlf}, data}
   end
 
-  def parse(data, {:body_chunked, :chunk_trailers}) do
+  @forbidden_trailers ~w(transfer-encoding content-length host)
+
+  def parse(data, {:body_chunked, {:chunk_trailers, acc}}) do
     case find_line(data) do
       {:ok, "", rest} ->
-        {[:done], :idle, rest}
+        fragments = if acc == [], do: [:done], else: [{:trailers, Enum.reverse(acc)}, :done]
+        {fragments, :idle, rest}
 
-      {:ok, _trailer, rest} ->
-        parse(rest, {:body_chunked, :chunk_trailers})
+      {:ok, line, rest} ->
+        case parse_header(line) do
+          {:ok, header} ->
+            parse(rest, {:body_chunked, {:chunk_trailers, maybe_add_trailer(acc, header)}})
+
+          {:error, _} = error ->
+            error
+        end
 
       :incomplete ->
-        {[], {:body_chunked, :chunk_trailers}, data}
+        {[], {:body_chunked, {:chunk_trailers, acc}}, data}
     end
   end
 
@@ -149,6 +156,25 @@ defmodule Quiver.Conn.HTTP1.Parse do
 
   def parse(data, :body_until_close) do
     {[{:data, data}], :body_until_close, ""}
+  end
+
+  defp complete_headers(status, _acc, rest) when is_informational(status) do
+    {[], :status, rest}
+  end
+
+  defp complete_headers(status, acc, rest) do
+    headers = Enum.reverse(acc)
+
+    case select_body_mode(status, headers) do
+      {:error, _} = error ->
+        error
+
+      :idle ->
+        {[{:headers, headers}, :done], :idle, rest}
+
+      state ->
+        {[{:headers, headers}], state, rest}
+    end
   end
 
   # Private helpers
@@ -172,7 +198,7 @@ defmodule Quiver.Conn.HTTP1.Parse do
   defp parse_chunk_size(size_str, size_line, rest, _original_data) do
     case Integer.parse(size_str, 16) do
       {0, ""} ->
-        parse(rest, {:body_chunked, :chunk_trailers})
+        parse(rest, {:body_chunked, {:chunk_trailers, []}})
 
       {size, ""} ->
         parse(rest, {:body_chunked, {:chunk_data, size}})
@@ -212,6 +238,10 @@ defmodule Quiver.Conn.HTTP1.Parse do
       true ->
         :body_until_close
     end
+  end
+
+  defp maybe_add_trailer(acc, {name, _} = header) do
+    if name in @forbidden_trailers, do: acc, else: [header | acc]
   end
 
   defp has_header?(headers, name, value) do

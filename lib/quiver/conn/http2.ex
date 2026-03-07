@@ -13,7 +13,8 @@ defmodule Quiver.Conn.HTTP2 do
   alias Quiver.Conn.HTTP2.Frame
   alias Quiver.Error.CompressionError
   alias Quiver.Error.ConnectionClosed
-  alias Quiver.Error.GoAway, as: GoAwayError
+  alias Quiver.Error.GoAwayUnprocessed
+  alias Quiver.Error.HeaderListTooLarge
   alias Quiver.Error.InvalidScheme
   alias Quiver.Error.MaxConcurrentStreamsReached
   alias Quiver.Error.ProtocolViolation
@@ -29,10 +30,6 @@ defmodule Quiver.Conn.HTTP2 do
   @default_max_frame_size 16_384
   @rfc_default_window_size 65_535
   @window_update_ratio 0.5
-
-  @error_no_error 0x0
-  @error_refused_stream 0x7
-  @error_cancel 0x8
 
   typedstruct do
     field(:transport, Transport.t(), enforce: true)
@@ -133,7 +130,7 @@ defmodule Quiver.Conn.HTTP2 do
 
   def close(%__MODULE__{transport: transport, transport_mod: mod} = conn) do
     last_id = max_processed_stream_id(conn)
-    goaway = Frame.encode_goaway(last_id, @error_no_error, "")
+    goaway = Frame.encode_goaway(last_id, :no_error, "")
     _ = mod.send(transport, goaway)
     _ = mod.close(transport)
     {:ok, %{conn | state: :closed, open_stream_count: 0}}
@@ -218,7 +215,7 @@ defmodule Quiver.Conn.HTTP2 do
         {:error, conn, StreamClosed.exception(stream_id: 0)}
 
       stream_id ->
-        frame = Frame.encode_rst_stream(stream_id, @error_cancel)
+        frame = Frame.encode_rst_stream(stream_id, :cancel)
 
         case conn.transport_mod.send(conn.transport, frame) do
           {:ok, transport} ->
@@ -311,6 +308,14 @@ defmodule Quiver.Conn.HTTP2 do
     ]
 
     all_headers = pseudo_headers ++ Quiver.Utils.normalize_headers(headers)
+
+    case validate_header_list_size(conn, all_headers) do
+      :ok -> encode_and_build_request(conn, stream_id, ref, all_headers, body)
+      {:error, error} -> {:error, conn, error}
+    end
+  end
+
+  defp encode_and_build_request(conn, stream_id, ref, all_headers, body) do
     {encoded_headers, encode_table} = HPAX.encode(:store, all_headers, conn.encode_table)
     header_block = IO.iodata_to_binary(encoded_headers)
 
@@ -386,11 +391,15 @@ defmodule Quiver.Conn.HTTP2 do
   end
 
   defp do_open_request(conn, method, path, headers, body) do
-    {:ok, conn, ref, frames} = prepare_open_request(conn, method, path, headers, body)
+    case prepare_open_request(conn, method, path, headers, body) do
+      {:ok, conn, ref, frames} ->
+        case conn.transport_mod.send(conn.transport, frames) do
+          {:ok, transport} -> {:ok, %{conn | transport: transport}, ref}
+          {:error, transport, reason} -> {:error, %{conn | transport: transport}, reason}
+        end
 
-    case conn.transport_mod.send(conn.transport, frames) do
-      {:ok, transport} -> {:ok, %{conn | transport: transport}, ref}
-      {:error, transport, reason} -> {:error, %{conn | transport: transport}, reason}
+      {:error, _conn, _reason} = error ->
+        error
     end
   end
 
@@ -438,6 +447,13 @@ defmodule Quiver.Conn.HTTP2 do
         _ -> []
       end)
 
+    trailers =
+      fragments
+      |> Enum.flat_map(fn
+        {:trailers, ^ref, t} -> t
+        _ -> []
+      end)
+
     data_chunks = for {:data, ^ref, d} <- fragments, d != "", do: d
 
     body =
@@ -446,7 +462,7 @@ defmodule Quiver.Conn.HTTP2 do
         chunks -> IO.iodata_to_binary(chunks)
       end
 
-    %Quiver.Response{status: status, headers: headers, body: body}
+    %Quiver.Response{status: status, headers: headers, body: body, trailers: trailers}
   end
 
   # -- Frame decoding loop --
@@ -482,7 +498,7 @@ defmodule Quiver.Conn.HTTP2 do
   # -- Frame handlers --
 
   defp handle_frame(conn, {:data, 0, _flags, _payload}) do
-    send_goaway_and_close(conn, 0x1, "DATA frame on stream 0")
+    send_goaway_and_close(conn, :protocol_error, "DATA frame on stream 0")
   end
 
   defp handle_frame(conn, {:data, stream_id, flags, payload}) do
@@ -511,7 +527,7 @@ defmodule Quiver.Conn.HTTP2 do
   end
 
   defp handle_frame(conn, {:headers, 0, _flags, _header_block, _priority}) do
-    send_goaway_and_close(conn, 0x1, "HEADERS frame on stream 0")
+    send_goaway_and_close(conn, :protocol_error, "HEADERS frame on stream 0")
   end
 
   defp handle_frame(conn, {:headers, stream_id, flags, header_block, _priority}) do
@@ -635,8 +651,8 @@ defmodule Quiver.Conn.HTTP2 do
   end
 
   defp handle_frame(conn, {:goaway, last_stream_id, error_code, debug_data}) do
-    error =
-      GoAwayError.exception(
+    unprocessed_error =
+      GoAwayUnprocessed.exception(
         last_stream_id: last_stream_id,
         error_code: error_code,
         debug_data: debug_data
@@ -646,7 +662,7 @@ defmodule Quiver.Conn.HTTP2 do
       for {id, stream} <- conn.streams,
           id > last_stream_id,
           stream.state in [:open, :half_closed_local],
-          do: {:error, stream.ref, error}
+          do: {:error, stream.ref, unprocessed_error}
 
     conn =
       Enum.reduce(conn.streams, conn, fn {id, _stream}, acc ->
@@ -657,7 +673,7 @@ defmodule Quiver.Conn.HTTP2 do
   end
 
   defp handle_frame(conn, {:rst_stream, 0, _error_code}) do
-    send_goaway_and_close(conn, 0x1, "RST_STREAM frame on stream 0")
+    send_goaway_and_close(conn, :protocol_error, "RST_STREAM frame on stream 0")
   end
 
   defp handle_frame(conn, {:rst_stream, stream_id, error_code}) do
@@ -673,7 +689,7 @@ defmodule Quiver.Conn.HTTP2 do
   end
 
   defp handle_frame(conn, {:push_promise, _stream_id, _flags, promised_id, _header_block}) do
-    rst = Frame.encode_rst_stream(promised_id, @error_refused_stream)
+    rst = Frame.encode_rst_stream(promised_id, :refused_stream)
 
     case conn.transport_mod.send(conn.transport, rst) do
       {:ok, transport} -> {:ok, %{conn | transport: transport}, []}
@@ -707,6 +723,15 @@ defmodule Quiver.Conn.HTTP2 do
     case Map.get(conn.streams, stream_id) do
       nil ->
         {:ok, conn, []}
+
+      %{received_headers?: true} when not end_stream? ->
+        send_goaway_and_close(conn, :protocol_error, "trailer HEADERS without END_STREAM")
+
+      %{received_headers?: true} = stream ->
+        regular = Enum.reject(decoded_headers, fn {name, _} -> String.starts_with?(name, ":") end)
+        fragments = if regular != [], do: [{:trailers, stream.ref, regular}], else: []
+        conn = transition_stream(conn, stream_id, :half_closed_remote)
+        {:ok, conn, fragments ++ [{:done, stream.ref}]}
 
       stream ->
         {pseudo, regular} =
@@ -1009,6 +1034,26 @@ defmodule Quiver.Conn.HTTP2 do
 
   defp ensure_binary(data) when is_binary(data), do: data
   defp ensure_binary(data), do: IO.iodata_to_binary(data)
+
+  defp header_list_size(headers) do
+    Enum.reduce(headers, 0, fn {name, value}, acc ->
+      acc + byte_size(name) + byte_size(value) + 32
+    end)
+  end
+
+  defp validate_header_list_size(conn, headers) do
+    case Map.get(conn.server_settings, :max_header_list_size) do
+      nil ->
+        :ok
+
+      max_size ->
+        size = header_list_size(headers)
+
+        if size <= max_size,
+          do: :ok,
+          else: {:error, HeaderListTooLarge.exception(size: size, max_size: max_size)}
+    end
+  end
 
   defp settings_to_pairs(settings) do
     Enum.map(settings, fn {key, value} ->

@@ -41,7 +41,12 @@ end
 
 defmodule Quiver.Error.GoAway do
   @moduledoc """
-  Server sent GOAWAY frame, rejecting streams above last_stream_id.
+  Connection-level GOAWAY signal -- the connection is shutting down.
+
+  This is an unrecoverable error representing the GOAWAY event itself.
+  For streams that were never processed by the server (stream ID above
+  `last_stream_id`), see `Quiver.Error.GoAwayUnprocessed` which is
+  transient and safe to retry on a new connection.
   """
 
   use Splode.Error, fields: [:last_stream_id, :error_code, :debug_data], class: :unrecoverable

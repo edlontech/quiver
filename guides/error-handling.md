@@ -97,6 +97,7 @@ violations). Log them, alert your monitoring system, and investigate.
 | `Quiver.Error.StreamClosed` | Operation on a closed HTTP/2 stream |
 | `Quiver.Error.MaxConcurrentStreamsReached` | Server's max concurrent streams limit hit |
 | `Quiver.Error.StreamError` | Error while consuming a streaming response body |
+| `Quiver.Error.GoAwayUnprocessed` | Stream was never processed before GOAWAY; safe to retry on a new connection |
 
 ### Invalid Errors
 
@@ -115,7 +116,7 @@ violations). Log them, alert your monitoring system, and investigate.
 | `Quiver.Error.TLSVerificationFailed` | TLS certificate verification failed |
 | `Quiver.Error.TLSHandshakeFailed` | TLS handshake failed (cipher mismatch, protocol error) |
 | `Quiver.Error.ProtocolViolation` | Malformed status line, invalid version, garbage bytes |
-| `Quiver.Error.GoAway` | Server sent GOAWAY, rejecting streams |
+| `Quiver.Error.GoAway` | Connection-level GOAWAY signal; the connection is shutting down |
 | `Quiver.Error.StreamReset` | Remote peer reset a specific HTTP/2 stream |
 | `Quiver.Error.FrameSizeError` | HTTP/2 frame exceeds maximum size |
 | `Quiver.Error.CompressionError` | HPACK header decompression failed |

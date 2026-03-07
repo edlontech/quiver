@@ -9,5 +9,6 @@ defmodule Quiver.Response do
     field(:status, non_neg_integer(), enforce: true)
     field(:headers, [{String.t(), String.t()}], default: [])
     field(:body, iodata() | nil, default: nil)
+    field(:trailers, [{String.t(), String.t()}], default: [])
   end
 end

@@ -15,6 +15,7 @@ defmodule Quiver.StreamResponse do
     field(:status, non_neg_integer(), enforce: true)
     field(:headers, [{String.t(), String.t()}], enforce: true)
     field(:body, Enumerable.t(), enforce: true)
+    field(:trailers, [{String.t(), String.t()}], default: [])
 
     @typedoc false
     field(:ref, reference(), enforce: true)

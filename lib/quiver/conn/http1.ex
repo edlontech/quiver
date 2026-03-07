@@ -372,6 +372,7 @@ defmodule Quiver.Conn.HTTP1 do
     Enum.map(fragments, fn
       {:status, s} -> {:status, ref, s}
       {:headers, h} -> {:headers, ref, h}
+      {:trailers, t} -> {:trailers, ref, t}
       {:data, d} -> {:data, ref, d}
       :done -> {:done, ref}
     end)
@@ -417,6 +418,12 @@ defmodule Quiver.Conn.HTTP1 do
         _ -> nil
       end) || []
 
+    trailers =
+      Enum.find_value(fragments, fn
+        {:trailers, _ref, t} -> t
+        _ -> nil
+      end) || []
+
     data_chunks = for {:data, _ref, d} <- fragments, d != "", do: d
 
     body =
@@ -425,7 +432,7 @@ defmodule Quiver.Conn.HTTP1 do
         chunks -> IO.iodata_to_binary(chunks)
       end
 
-    %Quiver.Response{status: status, headers: headers, body: body}
+    %Quiver.Response{status: status, headers: headers, body: body, trailers: trailers}
   end
 
   defp transport_for_scheme("http"), do: {Quiver.Transport.TCP, :http}

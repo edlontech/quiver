@@ -116,6 +116,7 @@ defmodule Quiver.Pool.HTTP2 do
 
         receive do
           {:chunk, ^ref, data} -> {[data], {ref, worker_pid}}
+          {:trailers, ^ref, _trailers} -> {[], {ref, worker_pid}}
           {:done, ^ref} -> {:halt, {ref, worker_pid}}
           {:error, ^ref, reason} -> raise StreamError.exception(reason: reason)
         end
