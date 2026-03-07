@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0](https://github.com/edlontech/quiver/compare/v0.1.3...v0.2.0) (2026-03-07)
+
+
+### Features
+
+* 101 upgrade mechanism with transport handoff ([ed75115](https://github.com/edlontech/quiver/commit/ed751159e5bc206c750e77e0629b3abd33bda3fe))
+* proxy support with CONNECT tunneling ([8d3047d](https://github.com/edlontech/quiver/commit/8d3047d417a23e6538aae662833335fea932b35a))
+* request body streaming for HTTP/1.1 and HTTP/2 ([c7504fd](https://github.com/edlontech/quiver/commit/c7504fd535636b1e1efd7351d7624be3eafd2582))
+
+
+### Bug Fixes
+
+* RFC Compliance Improvement ([acceb1d](https://github.com/edlontech/quiver/commit/acceb1def5c2bf6faf90b859efc22faef7c945ef))
+
 ## [0.1.3](https://github.com/edlontech/quiver/compare/v0.1.2...v0.1.3) (2026-03-06)
 
 
