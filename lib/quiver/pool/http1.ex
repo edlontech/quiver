@@ -224,12 +224,16 @@ defmodule Quiver.Pool.HTTP1 do
     checkout_fn = fn _from, client ->
       case connect_and_request(client, method, path, headers, body) do
         {:ok, conn, response} -> {{:ok, response}, transfer_ownership(conn, pool)}
+        {:upgrade, _conn, upgrade} -> {{:upgrade, upgrade}, :not_connected}
         {:error, conn, reason} -> {{:error, reason}, conn}
         {:error, reason} -> {{:error, reason}, :not_connected}
       end
     end
 
-    nimble_checkout(pool, checkout_fn, timeout, origin)
+    case nimble_checkout(pool, checkout_fn, timeout, origin) do
+      {:upgrade, upgrade} -> transfer_upgrade_ownership(upgrade)
+      other -> other
+    end
   end
 
   defp do_stream_checkout(pool, method, path, headers, body, timeout) do
@@ -309,6 +313,13 @@ defmodule Quiver.Pool.HTTP1 do
       )
     catch
       :exit, _ -> :ok
+    end
+  end
+
+  defp transfer_upgrade_ownership(upgrade) do
+    case upgrade.transport_mod.controlling_process(upgrade.transport, self()) do
+      {:ok, transport} -> {:upgrade, %{upgrade | transport: transport}}
+      {:error, _transport, _reason} -> {:upgrade, upgrade}
     end
   end
 

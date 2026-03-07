@@ -198,7 +198,8 @@ defmodule Quiver.Conn.HTTP1.ParseTest do
 
       {fragments2, state2, rest2} = Parse.parse(rest, state)
       assert {:headers, [{"upgrade", "websocket"}]} in fragments2
-      assert state2 == :body_until_close
+      assert :done in fragments2
+      assert state2 == :idle
       assert rest2 == ""
     end
 

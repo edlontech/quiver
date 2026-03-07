@@ -9,6 +9,8 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
   use GenStateMachine, callback_mode: [:state_functions, :state_enter]
 
+  @dialyzer {:no_opaque, connected: 3}
+
   alias Quiver.Conn.HTTP2, as: H2
   alias Quiver.Error.ProtocolViolation
   alias Quiver.Proxy

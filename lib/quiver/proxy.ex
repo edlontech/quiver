@@ -6,6 +6,7 @@ defmodule Quiver.Proxy do
   alias Quiver.Error.ProxyConnectFailed
   alias Quiver.Transport.TCP
 
+  @doc false
   @spec connect_tunnel(
           String.t(),
           :inet.port_number(),

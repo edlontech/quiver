@@ -16,6 +16,7 @@ defmodule Quiver.Conn.HTTP1 do
   alias Quiver.Error.InvalidScheme
   alias Quiver.Error.ProtocolViolation
   alias Quiver.Transport
+  alias Quiver.Upgrade
 
   @default_recv_timeout 15_000
 
@@ -349,7 +350,7 @@ defmodule Quiver.Conn.HTTP1 do
 
         if response_complete?(fragments) do
           response = assemble_response(all_fragments)
-          {:ok, %{conn | request_state: :idle}, response}
+          maybe_upgrade(%{conn | request_state: :idle}, response)
         else
           recv_loop(conn, all_fragments)
         end
@@ -429,6 +430,20 @@ defmodule Quiver.Conn.HTTP1 do
           {chunks, _} -> {:ok, conn, IO.iodata_to_binary(chunks)}
         end
     end
+  end
+
+  defp maybe_upgrade(conn, %Quiver.Response{status: 101} = response) do
+    upgrade = %Upgrade{
+      headers: response.headers,
+      transport: conn.transport,
+      transport_mod: conn.transport_mod
+    }
+
+    {:upgrade, %{conn | keep_alive: false}, upgrade}
+  end
+
+  defp maybe_upgrade(conn, response) do
+    {:ok, conn, response}
   end
 
   defp tag_fragments(fragments, ref) do

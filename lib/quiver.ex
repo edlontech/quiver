@@ -27,6 +27,7 @@ defmodule Quiver do
   alias Quiver.Response
   alias Quiver.StreamResponse
   alias Quiver.Telemetry
+  alias Quiver.Upgrade
 
   @default_name Quiver.Pool
   @default_receive_timeout 15_000
@@ -134,7 +135,8 @@ defmodule Quiver do
         Quiver.new(:get, "https://internal.api/data")
         |> Quiver.request(name: :internal_client, receive_timeout: 30_000)
   """
-  @spec request(Request.t(), keyword()) :: {:ok, Response.t()} | {:error, term()}
+  @spec request(Request.t(), keyword()) ::
+          {:ok, Response.t()} | {:upgrade, Upgrade.t()} | {:error, term()}
   def request(%Request{} = request, opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, @default_name)
     timeout = Keyword.get(opts, :receive_timeout, @default_receive_timeout)
@@ -212,6 +214,7 @@ defmodule Quiver do
         case result do
           {:ok, %Response{} = response} -> %{response: response}
           {:ok, %StreamResponse{} = stream_response} -> %{stream_response: stream_response}
+          {:upgrade, %Upgrade{} = upgrade} -> %{upgrade: upgrade}
           {:error, _} -> %{}
         end
 

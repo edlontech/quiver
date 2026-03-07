@@ -28,12 +28,14 @@ defmodule Quiver.Conn.HTTP1.Request do
     end
   end
 
+  @doc false
   @spec encode_chunk(iodata()) :: iodata()
   def encode_chunk(data) do
     size = IO.iodata_length(data)
     [Integer.to_string(size, 16), "\r\n", data, "\r\n"]
   end
 
+  @doc false
   @spec encode_last_chunk() :: binary()
   def encode_last_chunk do
     "0\r\n\r\n"

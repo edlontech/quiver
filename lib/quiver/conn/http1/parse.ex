@@ -218,7 +218,7 @@ defmodule Quiver.Conn.HTTP1.Parse do
     end
   end
 
-  defp select_body_mode(status, _headers) when status in [204, 304], do: :idle
+  defp select_body_mode(status, _headers) when status in [101, 204, 304], do: :idle
 
   defp select_body_mode(_status, headers) do
     cond do

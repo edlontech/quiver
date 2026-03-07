@@ -158,6 +158,41 @@ defmodule QuiverTest do
     end
   end
 
+  describe "request/2 upgrade" do
+    setup do
+      name = :"upgrade_#{System.unique_integer([:positive])}"
+      {:ok, port, listen_socket} = start_upgrade_server()
+      {:ok, _} = QuiverSupervisor.start_link(name: name, pools: %{default: []})
+
+      on_exit(fn -> :gen_tcp.close(listen_socket) end)
+
+      %{name: name, port: port}
+    end
+
+    test "propagates {:upgrade, %Upgrade{}} from pool", %{name: name, port: port} do
+      result =
+        Quiver.new(:get, "http://127.0.0.1:#{port}/ws")
+        |> Quiver.header("upgrade", "websocket")
+        |> Quiver.header("connection", "Upgrade")
+        |> Quiver.request(name: name)
+
+      assert {:upgrade, %Quiver.Upgrade{status: 101} = upgrade} = result
+      assert List.keyfind(upgrade.headers, "upgrade", 0) == {"upgrade", "websocket"}
+    end
+
+    test "upgraded transport is usable after top-level request", %{name: name, port: port} do
+      {:upgrade, upgrade} =
+        Quiver.new(:get, "http://127.0.0.1:#{port}/ws")
+        |> Quiver.header("upgrade", "websocket")
+        |> Quiver.header("connection", "Upgrade")
+        |> Quiver.request(name: name)
+
+      {:ok, transport} = upgrade.transport_mod.send(upgrade.transport, "world")
+      {:ok, _transport, data} = upgrade.transport_mod.recv(transport, 0, 2_000)
+      assert data == "world"
+    end
+  end
+
   describe "stream_request/2" do
     setup do
       name = :"stream_#{System.unique_integer([:positive])}"
@@ -188,6 +223,55 @@ defmodule QuiverTest do
 
       chunks = Enum.take(body, 1)
       assert chunks != []
+    end
+  end
+
+  defp start_upgrade_server do
+    {:ok, listen_socket} =
+      :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, packet: :raw])
+
+    {:ok, port} = :inet.port(listen_socket)
+    pid = spawn_link(fn -> upgrade_accept_loop(listen_socket) end)
+    :ok = :gen_tcp.controlling_process(listen_socket, pid)
+
+    {:ok, port, listen_socket}
+  end
+
+  defp upgrade_accept_loop(listen_socket) do
+    case :gen_tcp.accept(listen_socket, 2_000) do
+      {:ok, socket} ->
+        spawn_link(fn -> handle_upgrade(socket) end)
+        upgrade_accept_loop(listen_socket)
+
+      {:error, :timeout} ->
+        upgrade_accept_loop(listen_socket)
+
+      {:error, _} ->
+        :ok
+    end
+  end
+
+  defp handle_upgrade(socket) do
+    {:ok, _data} = :gen_tcp.recv(socket, 0, 5_000)
+
+    response =
+      "HTTP/1.1 101 Switching Protocols\r\n" <>
+        "upgrade: websocket\r\n" <>
+        "connection: Upgrade\r\n" <>
+        "\r\n"
+
+    :gen_tcp.send(socket, response)
+    upgrade_echo_loop(socket)
+  end
+
+  defp upgrade_echo_loop(socket) do
+    case :gen_tcp.recv(socket, 0, 5_000) do
+      {:ok, data} ->
+        :gen_tcp.send(socket, data)
+        upgrade_echo_loop(socket)
+
+      {:error, _} ->
+        :gen_tcp.close(socket)
     end
   end
 end
