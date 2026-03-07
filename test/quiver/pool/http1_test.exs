@@ -210,6 +210,69 @@ defmodule Quiver.Pool.HTTP1Test do
     end
   end
 
+  describe "request/6 with streaming body" do
+    test "sends streaming body through HTTP/1 pool" do
+      handler = fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        Plug.Conn.send_resp(conn, 200, body)
+      end
+
+      {:ok, %{port: port} = server} = TestServer.start(handler)
+      {:ok, pool} = start_pool(port)
+
+      chunks = Stream.map(1..5, fn i -> "chunk#{i}" end)
+
+      assert {:ok, %Quiver.Response{status: 200, body: body}} =
+               Pool.request(
+                 pool,
+                 :post,
+                 "/",
+                 [{"transfer-encoding", "chunked"}],
+                 {:stream, chunks}
+               )
+
+      assert body == "chunk1chunk2chunk3chunk4chunk5"
+
+      GenServer.stop(pool)
+      TestServer.stop(server)
+    end
+
+    test "reuses connection after streaming body request" do
+      handler = fn conn ->
+        case conn.method do
+          "POST" ->
+            {:ok, body, conn} = Plug.Conn.read_body(conn)
+            Plug.Conn.send_resp(conn, 200, body)
+
+          _ ->
+            Plug.Conn.send_resp(conn, 200, "ok")
+        end
+      end
+
+      {:ok, %{port: port} = server} = TestServer.start(handler)
+      {:ok, pool} = start_pool(port)
+
+      chunks = Stream.map(1..3, fn i -> "part#{i}" end)
+
+      assert {:ok, %Quiver.Response{status: 200}} =
+               Pool.request(
+                 pool,
+                 :post,
+                 "/",
+                 [{"transfer-encoding", "chunked"}],
+                 {:stream, chunks}
+               )
+
+      poll_until(fn -> Pool.stats(pool).idle >= 1 end)
+
+      assert {:ok, %Quiver.Response{status: 200, body: "ok"}} =
+               Pool.request(pool, :get, "/second", [], nil)
+
+      GenServer.stop(pool)
+      TestServer.stop(server)
+    end
+  end
+
   describe "stream_request/6" do
     test "returns StreamResponse with status, headers, and lazy body" do
       {:ok, %{port: port} = server} = start_server()

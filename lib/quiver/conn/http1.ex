@@ -110,6 +110,55 @@ defmodule Quiver.Conn.HTTP1 do
     end
   end
 
+  @spec stream_request(
+          t(),
+          Quiver.Conn.method(),
+          String.t(),
+          Quiver.Conn.headers(),
+          Enumerable.t()
+        ) ::
+          {:ok, t(), Quiver.Response.t()} | {:error, t(), term()}
+  def stream_request(
+        %__MODULE__{request_state: :in_flight} = conn,
+        _method,
+        _path,
+        _headers,
+        _body_enum
+      ) do
+    {:error, %{conn | keep_alive: false},
+     ProtocolViolation.exception(message: "request already in flight")}
+  end
+
+  def stream_request(%__MODULE__{} = conn, method, path, headers, body_enum) do
+    headers = add_host_header(headers, conn.host, conn.port, conn.scheme)
+    head = RequestEncoder.encode(method, path, headers, :stream)
+
+    with {:ok, transport} <- conn.transport_mod.send(conn.transport, head),
+         conn = %{conn | transport: transport},
+         {:ok, conn} <- send_chunks(conn, body_enum),
+         {:ok, transport} <-
+           conn.transport_mod.send(conn.transport, RequestEncoder.encode_last_chunk()) do
+      ref = make_ref()
+
+      conn = %{
+        conn
+        | transport: transport,
+          request_state: :in_flight,
+          parse_state: :status,
+          buffer: "",
+          request_ref: ref
+      }
+
+      recv_loop(conn, [])
+    else
+      {:error, transport, reason} when is_struct(transport) ->
+        {:error, %{conn | transport: transport, keep_alive: false}, reason}
+
+      {:error, conn, reason} ->
+        {:error, conn, reason}
+    end
+  end
+
   @impl true
   def open_request(%__MODULE__{request_state: :in_flight} = conn, _method, _path, _headers, _body) do
     {:error, %{conn | keep_alive: false},
@@ -249,6 +298,20 @@ defmodule Quiver.Conn.HTTP1 do
 
   defp stream_parse_continue(conn, _rest, all, false) do
     {:ok, conn, all}
+  end
+
+  defp send_chunks(conn, enumerable) do
+    Enum.reduce_while(enumerable, {:ok, conn}, fn chunk, {:ok, acc_conn} ->
+      encoded = RequestEncoder.encode_chunk(chunk)
+
+      case acc_conn.transport_mod.send(acc_conn.transport, encoded) do
+        {:ok, transport} ->
+          {:cont, {:ok, %{acc_conn | transport: transport}}}
+
+        {:error, transport, reason} ->
+          {:halt, {:error, %{acc_conn | transport: transport, keep_alive: false}, reason}}
+      end
+    end)
   end
 
   defp recv_loop(conn, acc_fragments) do

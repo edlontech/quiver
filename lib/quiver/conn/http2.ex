@@ -184,6 +184,71 @@ defmodule Quiver.Conn.HTTP2 do
     end
   end
 
+  @doc """
+  Prepares a streaming request by sending only HEADERS (without END_STREAM).
+
+  Returns `{:ok, conn, ref, frames}` where `frames` contains the HEADERS frame
+  ready to be sent. The stream remains in `:open` state, allowing subsequent
+  `prepare_stream_data/3` and `prepare_stream_end/2` calls.
+  """
+  @spec prepare_stream_request(t(), atom(), String.t(), list()) ::
+          {:ok, t(), reference(), iodata()} | {:error, t(), term()}
+  def prepare_stream_request(%__MODULE__{state: state} = conn, _method, _path, _headers)
+      when state != :open do
+    {:error, conn, ProtocolViolation.exception(message: "connection not open (state: #{state})")}
+  end
+
+  def prepare_stream_request(%__MODULE__{} = conn, method, path, headers) do
+    max = max_concurrent_streams(conn)
+
+    if open_request_count(conn) >= max do
+      {:error, conn, MaxConcurrentStreamsReached.exception(max: max)}
+    else
+      prepare_open_stream_request(conn, method, path, headers)
+    end
+  end
+
+  @doc """
+  Encodes DATA frames for a streaming chunk, respecting flow control.
+
+  Returns:
+  - `{:ok, conn, frames}` when the chunk fits in the send window
+  - `{:would_block, conn, frames}` when the window is partially or fully exhausted
+  - `{:error, conn, reason}` when the stream ref is unknown
+  """
+  @spec prepare_stream_data(t(), reference(), iodata()) ::
+          {:ok, t(), iodata()} | {:would_block, t(), iodata()} | {:error, t(), term()}
+  def prepare_stream_data(%__MODULE__{} = conn, ref, chunk) do
+    case Map.get(conn.ref_to_stream_id, ref) do
+      nil ->
+        {:error, conn, StreamClosed.exception(stream_id: 0)}
+
+      stream_id ->
+        do_prepare_stream_data(conn, stream_id, chunk)
+    end
+  end
+
+  @doc """
+  Sends an empty DATA frame with END_STREAM to finish a streaming request.
+
+  Transitions the stream to `:half_closed_local`.
+  """
+  @spec prepare_stream_end(t(), reference()) ::
+          {:ok, t(), iodata()} | {:error, t(), term()}
+  def prepare_stream_end(%__MODULE__{} = conn, ref) do
+    case Map.get(conn.ref_to_stream_id, ref) do
+      nil ->
+        {:error, conn, StreamClosed.exception(stream_id: 0)}
+
+      stream_id ->
+        stream = Map.fetch!(conn.streams, stream_id)
+        frame = Frame.encode_data(stream_id, "", true)
+        stream = %{stream | state: :half_closed_local}
+        conn = %{conn | streams: Map.put(conn.streams, stream_id, stream)}
+        {:ok, conn, frame}
+    end
+  end
+
   @impl true
   def stream(%__MODULE__{transport: %{socket: socket}} = conn, {tag, socket, data})
       when tag in [:tcp, :ssl] do
@@ -387,6 +452,92 @@ defmodule Quiver.Conn.HTTP2 do
         stream = %{stream | pending_send: body_binary}
         conn = %{conn | streams: Map.put(conn.streams, stream_id, stream)}
         {:ok, conn, stream.ref, header_frame}
+    end
+  end
+
+  defp prepare_open_stream_request(conn, method, path, headers) do
+    stream_id = conn.next_stream_id
+    ref = make_ref()
+
+    pseudo_headers = [
+      {":method", to_string(method) |> String.upcase()},
+      {":path", path},
+      {":scheme", to_string(conn.scheme)},
+      {":authority", authority(conn)}
+    ]
+
+    all_headers = pseudo_headers ++ Quiver.Utils.normalize_headers(headers)
+
+    case validate_header_list_size(conn, all_headers) do
+      :ok ->
+        {encoded_headers, encode_table} = HPAX.encode(:store, all_headers, conn.encode_table)
+        header_block = IO.iodata_to_binary(encoded_headers)
+        header_frame = Frame.encode_headers(stream_id, header_block, true, false)
+
+        stream = %{
+          id: stream_id,
+          ref: ref,
+          state: :open,
+          send_window: server_initial_window_size(conn),
+          recv_window: conn.client_settings.initial_window_size,
+          recv_window_consumed: 0,
+          received_headers?: false,
+          pending_send: nil
+        }
+
+        conn = %{
+          conn
+          | encode_table: encode_table,
+            next_stream_id: stream_id + 2,
+            streams: Map.put(conn.streams, stream_id, stream),
+            ref_to_stream_id: Map.put(conn.ref_to_stream_id, ref, stream_id),
+            open_stream_count: conn.open_stream_count + 1
+        }
+
+        {:ok, conn, ref, header_frame}
+
+      {:error, error} ->
+        {:error, conn, error}
+    end
+  end
+
+  defp do_prepare_stream_data(conn, stream_id, chunk) do
+    stream = Map.fetch!(conn.streams, stream_id)
+    max_frame = server_max_frame_size(conn)
+    allowed = min(conn.send_window, stream.send_window)
+    body_binary = ensure_binary(chunk)
+    total = byte_size(body_binary)
+
+    cond do
+      total <= allowed ->
+        data_frames = split_data_frames_no_end(stream_id, body_binary, max_frame)
+        stream = %{stream | send_window: stream.send_window - total}
+
+        conn = %{
+          conn
+          | send_window: conn.send_window - total,
+            streams: Map.put(conn.streams, stream_id, stream)
+        }
+
+        {:ok, conn, data_frames}
+
+      allowed > 0 ->
+        <<sent::binary-size(allowed), rest::binary>> = body_binary
+        data_frames = split_data_frames_no_end(stream_id, sent, max_frame)
+        stream = %{stream | pending_send: rest, send_window: stream.send_window - allowed}
+
+        conn = %{
+          conn
+          | send_window: conn.send_window - allowed,
+            streams: Map.put(conn.streams, stream_id, stream)
+        }
+
+        {:would_block, conn, data_frames}
+
+      true ->
+        stream = %{stream | pending_send: body_binary}
+        conn = %{conn | streams: Map.put(conn.streams, stream_id, stream)}
+        {:would_block, conn, []}
     end
   end
 

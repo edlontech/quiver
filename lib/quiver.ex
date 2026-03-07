@@ -94,6 +94,23 @@ defmodule Quiver do
   end
 
   @doc """
+  Sets a streaming body on the request.
+
+  Wraps the given enumerable in a `{:stream, enumerable}` tagged tuple,
+  replacing any previously set body. The enumerable will be consumed
+  lazily when the request is sent.
+
+  ## Examples
+
+      Quiver.new(:post, "https://example.com/upload")
+      |> Quiver.stream_body(Stream.map(chunks, &compress/1))
+  """
+  @spec stream_body(Request.t(), Enumerable.t()) :: Request.t()
+  def stream_body(%Request{} = request, enumerable) do
+    %{request | body: {:stream, enumerable}}
+  end
+
+  @doc """
   Executes the request and returns the full response.
 
   The entire response body is buffered in memory. For large responses,

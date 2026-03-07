@@ -85,6 +85,61 @@ defmodule Quiver.Pool.HTTP2Test do
     end
   end
 
+  describe "streaming request body" do
+    test "streams enumerable body through HTTP/2 pool" do
+      {:ok, %{port: port, cacerts: cacerts}} =
+        start_server(fn conn ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          Plug.Conn.send_resp(conn, 200, body)
+        end)
+
+      {:ok, pid} =
+        Pool.start_link(
+          origin: {:https, "127.0.0.1", port},
+          pool_opts: [verify: :verify_none, cacerts: cacerts]
+        )
+
+      chunks = ["hello", " ", "streaming", " ", "world"]
+      body = {:stream, Stream.map(chunks, & &1)}
+
+      assert {:ok, response} =
+               Pool.request(pid, :post, "/echo", [{"content-type", "text/plain"}], body,
+                 receive_timeout: 5_000
+               )
+
+      assert response.status == 200
+      assert response.body == "hello streaming world"
+    end
+
+    test "streams large body through HTTP/2 pool" do
+      {:ok, %{port: port, cacerts: cacerts}} =
+        start_server(fn conn ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn, length: 500_000)
+          Plug.Conn.send_resp(conn, 200, "received:#{byte_size(body)}")
+        end)
+
+      {:ok, pid} =
+        Pool.start_link(
+          origin: {:https, "127.0.0.1", port},
+          pool_opts: [verify: :verify_none, cacerts: cacerts]
+        )
+
+      chunk = String.duplicate("x", 1_024)
+      body = {:stream, Stream.repeatedly(fn -> chunk end) |> Stream.take(128)}
+
+      assert {:ok, response} =
+               Pool.request(
+                 pid,
+                 :post,
+                 "/large",
+                 [{"content-type", "application/octet-stream"}],
+                 body, receive_timeout: 10_000)
+
+      assert response.status == 200
+      assert response.body == "received:#{1_024 * 128}"
+    end
+  end
+
   describe "stats/1" do
     test "reports zero stats on fresh pool" do
       {:ok, %{port: port, cacerts: cacerts}} = start_server()

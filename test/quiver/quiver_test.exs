@@ -65,6 +65,37 @@ defmodule QuiverTest do
     end
   end
 
+  describe "stream_body/2" do
+    test "sets streaming body from list" do
+      req =
+        Quiver.new(:post, "https://example.com")
+        |> Quiver.stream_body(["chunk1", "chunk2"])
+
+      assert {:stream, enum} = req.body
+      assert Enum.to_list(enum) == ["chunk1", "chunk2"]
+    end
+
+    test "sets streaming body from Stream" do
+      stream = Stream.map(1..3, &Integer.to_string/1)
+
+      req =
+        Quiver.new(:put, "https://example.com/upload")
+        |> Quiver.stream_body(stream)
+
+      assert {:stream, enum} = req.body
+      assert Enum.to_list(enum) == ["1", "2", "3"]
+    end
+
+    test "overwrites previously set body" do
+      req =
+        Quiver.new(:post, "https://example.com")
+        |> Quiver.body("old")
+        |> Quiver.stream_body(["new"])
+
+      assert {:stream, _} = req.body
+    end
+  end
+
   describe "request/2 collected mode" do
     setup do
       name = :"quiver_req_#{System.unique_integer([:positive])}"

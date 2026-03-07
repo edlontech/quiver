@@ -73,4 +73,58 @@ defmodule Quiver.Conn.HTTP1.RequestTest do
       assert is_list(result)
     end
   end
+
+  describe "encode/4 with :stream" do
+    test "encodes headers with chunked transfer-encoding" do
+      encoded = Request.encode(:post, "/upload", [{"host", "example.com"}], :stream)
+      result = IO.iodata_to_binary(encoded)
+
+      assert result =~ "POST /upload HTTP/1.1\r\n"
+      assert result =~ "transfer-encoding: chunked\r\n"
+      assert String.ends_with?(result, "\r\n\r\n")
+      refute result =~ "content-length"
+    end
+
+    test "does not add chunked if transfer-encoding already present" do
+      headers = [{"host", "example.com"}, {"transfer-encoding", "chunked"}]
+      encoded = Request.encode(:post, "/upload", headers, :stream)
+      result = IO.iodata_to_binary(encoded)
+
+      occurrences = length(String.split(result, "transfer-encoding")) - 1
+      assert occurrences == 1
+    end
+
+    test "does not include a body" do
+      encoded = Request.encode(:post, "/upload", [{"host", "example.com"}], :stream)
+      result = IO.iodata_to_binary(encoded)
+
+      assert String.ends_with?(result, "\r\n\r\n")
+      [_headers, body] = String.split(result, "\r\n\r\n", parts: 2)
+      assert body == ""
+    end
+  end
+
+  describe "encode_chunk/1" do
+    test "wraps data in chunked encoding format" do
+      chunk = Request.encode_chunk("Hello")
+      assert IO.iodata_to_binary(chunk) == "5\r\nHello\r\n"
+    end
+
+    test "handles iodata input" do
+      chunk = Request.encode_chunk(["He", "llo"])
+      assert IO.iodata_to_binary(chunk) == "5\r\nHello\r\n"
+    end
+
+    test "encodes hex size correctly for larger data" do
+      data = String.duplicate("x", 255)
+      chunk = Request.encode_chunk(data)
+      assert IO.iodata_to_binary(chunk) == "FF\r\n#{data}\r\n"
+    end
+  end
+
+  describe "encode_last_chunk/0" do
+    test "returns terminal chunk" do
+      assert Request.encode_last_chunk() == "0\r\n\r\n"
+    end
+  end
 end

@@ -224,6 +224,79 @@ defmodule Quiver.Conn.HTTP1Test do
     end
   end
 
+  describe "stream_request/5" do
+    test "streams enumerable body and receives response" do
+      handler = fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        Plug.Conn.send_resp(conn, 200, body)
+      end
+
+      {:ok, %{port: port} = server} = TestServer.start(handler)
+
+      {:ok, conn} = connect(port)
+      chunks = ["hello", " ", "world"]
+
+      assert {:ok, _conn, %Quiver.Response{status: 200, body: "hello world"}} =
+               HTTP1.stream_request(
+                 conn,
+                 :post,
+                 "/echo",
+                 [{"content-type", "text/plain"}],
+                 chunks
+               )
+
+      TestServer.stop(server)
+    end
+
+    test "streams large body across multiple chunks" do
+      handler = fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        Plug.Conn.send_resp(conn, 200, Integer.to_string(byte_size(body)))
+      end
+
+      {:ok, %{port: port} = server} = TestServer.start(handler)
+
+      {:ok, conn} = connect(port)
+      chunk = String.duplicate("x", 1_000)
+      chunks = Stream.repeatedly(fn -> chunk end) |> Stream.take(10)
+
+      assert {:ok, _conn, %Quiver.Response{status: 200, body: "10000"}} =
+               HTTP1.stream_request(conn, :post, "/upload", [], chunks)
+
+      TestServer.stop(server)
+    end
+
+    test "connection remains open after streaming request" do
+      handler = fn conn ->
+        {:ok, _body, conn} = Plug.Conn.read_body(conn)
+        Plug.Conn.send_resp(conn, 200, "done")
+      end
+
+      {:ok, %{port: port} = server} = TestServer.start(handler)
+
+      {:ok, conn} = connect(port)
+
+      {:ok, conn, %Quiver.Response{status: 200}} =
+        HTTP1.stream_request(conn, :post, "/", [], ["data"])
+
+      assert HTTP1.open?(conn)
+      TestServer.stop(server)
+    end
+
+    test "returns error when request already in flight" do
+      handler = fn conn -> Plug.Conn.send_resp(conn, 200, "ok") end
+      {:ok, %{port: port} = server} = TestServer.start(handler)
+
+      {:ok, conn} = connect(port)
+      conn = %{conn | request_state: :in_flight}
+
+      assert {:error, _conn, %Quiver.Error.ProtocolViolation{}} =
+               HTTP1.stream_request(conn, :post, "/", [], ["data"])
+
+      TestServer.stop(server)
+    end
+  end
+
   describe "recv_response_headers/1 and recv_body_chunk/1" do
     test "receives status and headers eagerly", %{port: port} do
       {:ok, conn} = connect(port)

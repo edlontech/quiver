@@ -825,6 +825,164 @@ defmodule Quiver.Conn.HTTP2Test do
     end
   end
 
+  describe "prepare_stream_request/4" do
+    test "sends HEADERS without END_STREAM and stream state is :open" do
+      {:ok, conn, server} = connect_h2()
+
+      assert {:ok, conn, ref, frames} =
+               Conn.prepare_stream_request(conn, :post, "/upload", [
+                 {"content-type", "text/plain"}
+               ])
+
+      assert is_reference(ref)
+      assert frames != []
+
+      stream_id = Map.fetch!(conn.ref_to_stream_id, ref)
+      stream = Map.fetch!(conn.streams, stream_id)
+      assert stream.state == :open
+      assert Conn.open_request_count(conn) == 1
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+
+    test "rejects request on closed connection" do
+      {:ok, conn, server} = connect_h2()
+      {:ok, conn} = Conn.close(conn)
+
+      assert {:error, _conn, %Quiver.Error.ProtocolViolation{}} =
+               Conn.prepare_stream_request(conn, :post, "/upload", [])
+
+      TestServer.stop(server)
+    end
+
+    test "rejects request when max concurrent streams reached" do
+      {:ok, conn, server} = connect_h2()
+      conn = put_in(conn.server_settings[:max_concurrent_streams], 0)
+
+      assert {:error, _conn, %Quiver.Error.MaxConcurrentStreamsReached{}} =
+               Conn.prepare_stream_request(conn, :post, "/upload", [])
+
+      TestServer.stop(server)
+    end
+
+    test "enforces max_header_list_size" do
+      {:ok, conn, server} = connect_h2()
+      conn = put_in(conn.server_settings[:max_header_list_size], 100)
+
+      large_headers = [{"x-large", String.duplicate("a", 200)}]
+
+      assert {:error, _conn, %Quiver.Error.HeaderListTooLarge{}} =
+               Conn.prepare_stream_request(conn, :post, "/", large_headers)
+
+      TestServer.stop(server)
+    end
+  end
+
+  describe "prepare_stream_data/3" do
+    test "produces DATA frames within flow control window" do
+      {:ok, conn, server} = connect_h2()
+
+      {:ok, conn, ref, _header_frames} =
+        Conn.prepare_stream_request(conn, :post, "/upload", [])
+
+      chunk = "hello streaming"
+
+      assert {:ok, conn, data_frames} = Conn.prepare_stream_data(conn, ref, chunk)
+      assert data_frames != []
+
+      stream_id = Map.fetch!(conn.ref_to_stream_id, ref)
+      stream = Map.fetch!(conn.streams, stream_id)
+      assert stream.state == :open
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+
+    test "returns :would_block when window is exhausted" do
+      {:ok, conn, server} = connect_h2()
+
+      {:ok, conn, ref, _header_frames} =
+        Conn.prepare_stream_request(conn, :post, "/upload", [])
+
+      stream_id = Map.fetch!(conn.ref_to_stream_id, ref)
+      stream = Map.fetch!(conn.streams, stream_id)
+      stream = %{stream | send_window: 5}
+      conn = put_in(conn.streams[stream_id], stream)
+      conn = %{conn | send_window: 5}
+
+      chunk = "more than five bytes of data"
+
+      assert {:would_block, conn, partial_frames} = Conn.prepare_stream_data(conn, ref, chunk)
+      assert partial_frames != []
+
+      updated_stream = Map.fetch!(conn.streams, stream_id)
+      assert updated_stream.pending_send != nil
+      assert updated_stream.state == :open
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+
+    test "returns :would_block with empty frames when window is zero" do
+      {:ok, conn, server} = connect_h2()
+
+      {:ok, conn, ref, _header_frames} =
+        Conn.prepare_stream_request(conn, :post, "/upload", [])
+
+      stream_id = Map.fetch!(conn.ref_to_stream_id, ref)
+      stream = Map.fetch!(conn.streams, stream_id)
+      stream = %{stream | send_window: 0}
+      conn = put_in(conn.streams[stream_id], stream)
+      conn = %{conn | send_window: 0}
+
+      assert {:would_block, conn, []} = Conn.prepare_stream_data(conn, ref, "data")
+
+      updated_stream = Map.fetch!(conn.streams, stream_id)
+      assert updated_stream.pending_send == "data"
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+
+    test "returns error for unknown ref" do
+      {:ok, conn, server} = connect_h2()
+
+      assert {:error, _conn, %Quiver.Error.StreamClosed{}} =
+               Conn.prepare_stream_data(conn, make_ref(), "data")
+
+      TestServer.stop(server)
+    end
+  end
+
+  describe "prepare_stream_end/2" do
+    test "sends empty DATA with END_STREAM, state becomes :half_closed_local" do
+      {:ok, conn, server} = connect_h2()
+
+      {:ok, conn, ref, _header_frames} =
+        Conn.prepare_stream_request(conn, :post, "/upload", [])
+
+      assert {:ok, conn, end_frames} = Conn.prepare_stream_end(conn, ref)
+      assert end_frames != []
+
+      stream_id = Map.fetch!(conn.ref_to_stream_id, ref)
+      stream = Map.fetch!(conn.streams, stream_id)
+      assert stream.state == :half_closed_local
+
+      Conn.close(conn)
+      TestServer.stop(server)
+    end
+
+    test "returns error for unknown ref" do
+      {:ok, conn, server} = connect_h2()
+
+      assert {:error, _conn, %Quiver.Error.StreamClosed{}} =
+               Conn.prepare_stream_end(conn, make_ref())
+
+      TestServer.stop(server)
+    end
+  end
+
   # -- Helpers --
 
   defp connect_h2(handler \\ fn conn -> Plug.Conn.send_resp(conn, 200, "ok") end) do

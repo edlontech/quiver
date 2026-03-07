@@ -22,7 +22,9 @@ defmodule Quiver.Conn do
   @callback connect(uri :: URI.t(), opts :: keyword()) ::
               {:ok, t()} | {:error, term()}
 
-  @callback request(conn :: t(), method(), path :: String.t(), headers(), body :: iodata() | nil) ::
+  @type body :: iodata() | nil | {:stream, Enumerable.t()}
+
+  @callback request(conn :: t(), method(), path :: String.t(), headers(), body :: body()) ::
               {:ok, t(), Quiver.Response.t()} | {:error, t(), term()}
 
   @callback stream(conn :: t(), message :: term()) ::
@@ -37,7 +39,7 @@ defmodule Quiver.Conn do
               method(),
               path :: String.t(),
               headers(),
-              body :: iodata() | nil
+              body :: body()
             ) ::
               {:ok, t(), reference()} | {:error, t(), term()}
 

@@ -25,6 +25,18 @@ defmodule Quiver.RequestTest do
       assert request.body == ~s({"key": "value"})
     end
 
+    test "accepts streaming body as tagged tuple" do
+      chunks = ["chunk1", "chunk2"]
+
+      request = %Request{
+        method: :post,
+        url: URI.parse("https://example.com/upload"),
+        body: {:stream, chunks}
+      }
+
+      assert {:stream, ^chunks} = request.body
+    end
+
     test "enforces method field" do
       assert_raise ArgumentError, fn ->
         struct!(Request, url: URI.parse("https://example.com"))

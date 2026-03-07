@@ -9,6 +9,6 @@ defmodule Quiver.Request do
     field(:method, atom(), enforce: true)
     field(:url, URI.t(), enforce: true)
     field(:headers, [{String.t(), String.t()}], default: [])
-    field(:body, iodata() | nil, default: nil)
+    field(:body, iodata() | nil | {:stream, Enumerable.t()}, default: nil)
   end
 end

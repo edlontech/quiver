@@ -146,6 +146,45 @@ defmodule Quiver.Pool.HTTP2.Connection do
     end
   end
 
+  def connected(
+        :info,
+        {:forward_request, from, method, path, headers, {:stream, enumerable}, _timeout},
+        data
+      ) do
+    {caller_pid, _tag} = from
+
+    case H2.prepare_stream_request(data.conn, method, path, headers) do
+      {:ok, conn, ref, header_frames} ->
+        mon = Process.monitor(caller_pid)
+        stream_id = Map.fetch!(conn.ref_to_stream_id, ref)
+
+        worker = self()
+
+        {:ok, task_pid} =
+          Task.start_link(fn ->
+            stream_enumerable(worker, stream_id, enumerable)
+          end)
+
+        request = %{
+          from: from,
+          caller_pid: caller_pid,
+          monitor: mon,
+          acc: [],
+          stream_task: task_pid
+        }
+
+        requests = Map.put(data.requests, ref, request)
+        monitors = Map.put(data.monitors, mon, ref)
+        data = %{data | conn: conn, requests: requests, monitors: monitors}
+        schedule_flush(data, header_frames)
+
+      {:error, conn, reason} ->
+        GenStateMachine.reply(from, {:error, reason})
+        if data.pool_pid, do: send(data.pool_pid, {:stream_open_failed, self()})
+        {:keep_state, %{data | conn: conn}}
+    end
+  end
+
   def connected(:info, {:forward_request, from, method, path, headers, body, _timeout}, data) do
     {caller_pid, _tag} = from
 
@@ -239,6 +278,38 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
       {_, _} ->
         :keep_state_and_data
+    end
+  end
+
+  def connected(:info, {:stream_chunk, stream_id, chunk}, data) do
+    case find_ref_by_stream_id(data.conn, stream_id) do
+      nil ->
+        :keep_state_and_data
+
+      ref ->
+        case H2.prepare_stream_data(data.conn, ref, chunk) do
+          {:ok, conn, frames} ->
+            schedule_flush(%{data | conn: conn}, frames)
+
+          {:would_block, conn, frames} ->
+            schedule_flush(%{data | conn: conn}, frames)
+        end
+    end
+  end
+
+  def connected(:info, {:stream_done, stream_id}, data) do
+    case find_ref_by_stream_id(data.conn, stream_id) do
+      nil ->
+        :keep_state_and_data
+
+      ref ->
+        case H2.prepare_stream_end(data.conn, ref) do
+          {:ok, conn, frame} ->
+            schedule_flush(%{data | conn: conn}, frame)
+
+          {:error, conn, _reason} ->
+            {:keep_state, %{data | conn: conn}}
+        end
     end
   end
 
@@ -343,6 +414,38 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
       {_, _} ->
         maybe_stop_draining(data, :draining)
+    end
+  end
+
+  def draining(:info, {:stream_chunk, stream_id, chunk}, data) do
+    case find_ref_by_stream_id(data.conn, stream_id) do
+      nil ->
+        :keep_state_and_data
+
+      ref ->
+        case H2.prepare_stream_data(data.conn, ref, chunk) do
+          {:ok, conn, frames} ->
+            schedule_flush(%{data | conn: conn}, frames)
+
+          {:would_block, conn, frames} ->
+            schedule_flush(%{data | conn: conn}, frames)
+        end
+    end
+  end
+
+  def draining(:info, {:stream_done, stream_id}, data) do
+    case find_ref_by_stream_id(data.conn, stream_id) do
+      nil ->
+        :keep_state_and_data
+
+      ref ->
+        case H2.prepare_stream_end(data.conn, ref) do
+          {:ok, conn, frame} ->
+            schedule_flush(%{data | conn: conn}, frame)
+
+          {:error, conn, _reason} ->
+            {:keep_state, %{data | conn: conn}}
+        end
     end
   end
 
@@ -650,6 +753,21 @@ defmodule Quiver.Pool.HTTP2.Connection do
   defp cancel_idle_timer(%{idle_timer: nil}), do: :ok
   defp cancel_idle_timer(%{idle_timer: timer}), do: Process.cancel_timer(timer)
   defp cancel_idle_timer(_), do: :ok
+
+  defp stream_enumerable(worker, stream_id, enumerable) do
+    Enum.each(enumerable, fn chunk ->
+      send(worker, {:stream_chunk, stream_id, chunk})
+      Process.sleep(0)
+    end)
+
+    send(worker, {:stream_done, stream_id})
+  end
+
+  defp find_ref_by_stream_id(conn, stream_id) do
+    Enum.find_value(conn.ref_to_stream_id, fn {ref, sid} ->
+      if sid == stream_id, do: ref
+    end)
+  end
 
   defp assemble_response(fragments) do
     {status, headers, trailers, chunks} =

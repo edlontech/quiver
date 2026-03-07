@@ -330,12 +330,29 @@ defmodule Quiver.Pool.HTTP1 do
          method,
          path,
          headers,
+         {:stream, enumerable}
+       ) do
+    case instrumented_connect(origin, config) do
+      {:ok, conn} -> HTTP1.stream_request(conn, method, path, headers, enumerable)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp connect_and_request(
+         {:fresh, {_scheme, _host, _port} = origin, config},
+         method,
+         path,
+         headers,
          body
        ) do
     case instrumented_connect(origin, config) do
       {:ok, conn} -> HTTP1.request(conn, method, path, headers, body)
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp connect_and_request({:reuse, conn}, method, path, headers, {:stream, enumerable}) do
+    HTTP1.stream_request(conn, method, path, headers, enumerable)
   end
 
   defp connect_and_request({:reuse, conn}, method, path, headers, body) do

@@ -300,6 +300,153 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
     end
   end
 
+  describe "streaming body upload" do
+    test "streaming body arrives correctly at HTTP/2 server" do
+      {:ok, %{port: port, cacerts: cacerts}} =
+        start_server(fn conn ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          Plug.Conn.send_resp(conn, 200, body)
+        end)
+
+      {:ok, worker} =
+        Connection.start_link(
+          origin: {:https, "127.0.0.1", port},
+          config: [verify: :verify_none, cacerts: cacerts]
+        )
+
+      chunks = ["hello", " ", "streaming", " ", "world"]
+      body = {:stream, chunks}
+
+      tag = make_ref()
+      from = {self(), tag}
+
+      send(
+        worker,
+        {:forward_request, from, :post, "/", [{"content-type", "text/plain"}], body, 15_000}
+      )
+
+      assert_receive {^tag, {:ok, response}}, 10_000
+      assert response.status == 200
+      assert response.body == "hello streaming world"
+    end
+
+    test "streaming body with large chunks" do
+      {:ok, %{port: port, cacerts: cacerts}} =
+        start_server(fn conn ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          Plug.Conn.send_resp(conn, 200, "#{byte_size(body)}")
+        end)
+
+      {:ok, worker} =
+        Connection.start_link(
+          origin: {:https, "127.0.0.1", port},
+          config: [verify: :verify_none, cacerts: cacerts]
+        )
+
+      chunk = :crypto.strong_rand_bytes(50_000)
+      chunks = [chunk, chunk, chunk, chunk]
+      body = {:stream, chunks}
+
+      tag = make_ref()
+      from = {self(), tag}
+
+      send(
+        worker,
+        {:forward_request, from, :post, "/", [{"content-type", "application/octet-stream"}], body,
+         30_000}
+      )
+
+      assert_receive {^tag, {:ok, response}}, 30_000
+      assert response.status == 200
+      assert response.body == "200000"
+    end
+
+    test "multiple concurrent streaming requests work" do
+      {:ok, %{port: port, cacerts: cacerts}} =
+        start_server(fn conn ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          Plug.Conn.send_resp(conn, 201, body)
+        end)
+
+      {:ok, worker} =
+        Connection.start_link(
+          origin: {:https, "127.0.0.1", port},
+          config: [verify: :verify_none, cacerts: cacerts]
+        )
+
+      tasks =
+        for i <- 1..3 do
+          Task.async(fn ->
+            chunks = ["request-#{i}-part1", "-", "part2"]
+            body = {:stream, chunks}
+            tag = make_ref()
+            from = {self(), tag}
+
+            send(
+              worker,
+              {:forward_request, from, :post, "/", [{"content-type", "text/plain"}], body, 15_000}
+            )
+
+            receive do
+              {^tag, result} -> result
+            after
+              15_000 -> {:error, :timeout}
+            end
+          end)
+        end
+
+      results = Task.await_many(tasks, 30_000)
+
+      for {result, i} <- Enum.with_index(results, 1) do
+        assert {:ok, response} = result
+        assert response.status == 201
+        assert response.body == "request-#{i}-part1-part2"
+      end
+    end
+
+    test "stream task cleanup on connection close" do
+      {:ok, %{port: port, cacerts: cacerts, server: server, agent: agent}} =
+        start_server(fn conn ->
+          Process.sleep(10_000)
+          Plug.Conn.send_resp(conn, 200, "slow")
+        end)
+
+      {:ok, worker} =
+        Connection.start_link(
+          origin: {:https, "127.0.0.1", port},
+          config: [verify: :verify_none, cacerts: cacerts]
+        )
+
+      Process.unlink(worker)
+      mon = Process.monitor(worker)
+
+      slow_stream =
+        Stream.concat(
+          ["first_chunk"],
+          Stream.repeatedly(fn ->
+            Process.sleep(500)
+            "more"
+          end)
+        )
+
+      body = {:stream, slow_stream}
+      tag = make_ref()
+      from = {self(), tag}
+
+      send(
+        worker,
+        {:forward_request, from, :post, "/", [{"content-type", "text/plain"}], body, 30_000}
+      )
+
+      Process.sleep(200)
+
+      TestServer.stop(%{server: server, agent: agent})
+
+      assert_receive {:DOWN, ^mon, :process, ^worker, _reason}, 5_000
+      refute Process.alive?(worker)
+    end
+  end
+
   defp collect_stream_chunks(worker, ref, acc \\ []) do
     send(worker, {:demand, ref, self()})
 
