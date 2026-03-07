@@ -10,7 +10,10 @@ defmodule Quiver.Pool.HTTP2.Connection do
   use GenStateMachine, callback_mode: [:state_functions, :state_enter]
 
   alias Quiver.Conn.HTTP2, as: H2
+  alias Quiver.Error.ProtocolViolation
+  alias Quiver.Proxy
   alias Quiver.Response
+  alias Quiver.Transport.SSL
 
   defstruct [
     :conn,
@@ -86,10 +89,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
     config = Keyword.get(opts, :config, [])
     pool_pid = Keyword.get(opts, :pool_pid)
 
-    {scheme, host, port} = origin
-    uri = %URI{scheme: Atom.to_string(scheme), host: host, port: port}
-
-    case H2.connect(uri, config) do
+    case connect_h2(origin, config) do
       {:ok, conn} ->
         {:ok, transport} = conn.transport_mod.controlling_process(conn.transport, self())
         conn = put_in(conn.transport, transport)
@@ -107,6 +107,60 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
       {:error, reason} ->
         {:stop, reason}
+    end
+  end
+
+  defp connect_h2({scheme, host, port}, config) do
+    case Keyword.get(config, :proxy) do
+      nil ->
+        uri = %URI{scheme: Atom.to_string(scheme), host: host, port: port}
+        H2.connect(uri, config)
+
+      proxy_config when scheme == :https ->
+        proxy_connect_h2(host, port, config, proxy_config)
+
+      _proxy_config ->
+        uri = %URI{scheme: Atom.to_string(scheme), host: host, port: port}
+        H2.connect(uri, config)
+    end
+  end
+
+  defp proxy_connect_h2(host, port, config, proxy_config) do
+    proxy_host = Keyword.fetch!(proxy_config, :host)
+    proxy_port = Keyword.fetch!(proxy_config, :port)
+    proxy_headers = Keyword.get(proxy_config, :headers, [])
+    connect_timeout = Keyword.get(config, :connect_timeout, 5_000)
+
+    proxy_opts = [
+      headers: proxy_headers,
+      connect_timeout: connect_timeout
+    ]
+
+    ssl_opts = Keyword.put(config, :alpn_advertised_protocols, ["h2"])
+
+    with {:ok, tcp_transport} <-
+           Proxy.connect_tunnel(proxy_host, proxy_port, host, port, proxy_opts),
+         {:ok, ssl_transport} <- SSL.upgrade(tcp_transport.socket, host, port, ssl_opts) do
+      case SSL.negotiated_protocol(ssl_transport) do
+        "h2" ->
+          conn = %H2{
+            transport: ssl_transport,
+            transport_mod: SSL,
+            host: host,
+            port: port,
+            scheme: :https,
+            recv_timeout: Keyword.get(config, :recv_timeout, 15_000),
+            encode_table: HPAX.new(4096),
+            decode_table: HPAX.new(4096)
+          }
+
+          H2.perform_handshake(conn)
+
+        _other ->
+          SSL.close(ssl_transport)
+
+          {:error, ProtocolViolation.exception(message: "server did not negotiate h2 via ALPN")}
+      end
     end
   end
 

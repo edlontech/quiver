@@ -27,4 +27,13 @@ defmodule Quiver.Transport do
 
   @callback controlling_process(transport :: t(), pid :: pid()) ::
               {:ok, t()} | {:error, t(), term()}
+
+  @callback upgrade(
+              socket :: :gen_tcp.socket(),
+              host :: String.t(),
+              port :: :inet.port_number(),
+              opts :: [option()]
+            ) :: {:ok, t()} | {:error, term()}
+
+  @optional_callbacks [upgrade: 4]
 end

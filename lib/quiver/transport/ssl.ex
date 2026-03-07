@@ -92,6 +92,39 @@ defmodule Quiver.Transport.SSL do
   end
 
   @doc """
+  Upgrades an existing TCP socket to TLS.
+
+  Takes a raw `:gen_tcp` socket and performs TLS negotiation on it.
+  Used for CONNECT tunneling where a TCP connection to a proxy
+  is upgraded to TLS for the target host.
+  """
+  @impl true
+  @spec upgrade(:gen_tcp.socket(), String.t(), :inet.port_number(), keyword()) ::
+          {:ok, t()} | {:error, term()}
+  def upgrade(tcp_socket, host, port, opts) do
+    ssl_opts =
+      base_ssl_opts(host, opts)
+      |> add_verification(to_charlist(host), opts)
+      |> add_alpn(opts)
+
+    timeout = Keyword.get(opts, :connect_timeout, 5_000)
+
+    case :ssl.connect(tcp_socket, ssl_opts, timeout) do
+      {:ok, ssl_socket} ->
+        protocol =
+          case :ssl.negotiated_protocol(ssl_socket) do
+            {:ok, proto} -> proto
+            _ -> nil
+          end
+
+        {:ok, %__MODULE__{socket: ssl_socket, negotiated_protocol: protocol}}
+
+      {:error, reason} ->
+        handle_connect_result({:error, reason}, host, port)
+    end
+  end
+
+  @doc """
   Returns the ALPN protocol negotiated during the TLS handshake.
 
   Returns `nil` if no protocol was negotiated (e.g. no ALPN extension

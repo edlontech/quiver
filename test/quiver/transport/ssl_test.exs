@@ -92,6 +92,50 @@ defmodule Quiver.Transport.SSLTest do
     end
   end
 
+  describe "upgrade/4" do
+    test "upgrades a raw TCP socket to TLS", %{port: port} do
+      {:ok, tcp_socket} = :gen_tcp.connect(~c"localhost", port, [:binary, active: false], 5_000)
+
+      assert {:ok, %SSL{} = transport} =
+               SSL.upgrade(tcp_socket, "localhost", port, verify: :verify_none)
+
+      assert {:ok, transport} = SSL.send(transport, "upgraded")
+      assert {:ok, _transport, "upgraded"} = SSL.recv(transport, 8, 5_000)
+    end
+
+    test "upgrade with verify_peer and valid cacerts", %{port: port, certs: certs} do
+      {:ok, tcp_socket} = :gen_tcp.connect(~c"localhost", port, [:binary, active: false], 5_000)
+
+      assert {:ok, %SSL{}} =
+               SSL.upgrade(tcp_socket, "localhost", port,
+                 verify: :verify_peer,
+                 cacerts: certs.cacerts
+               )
+    end
+
+    test "upgrade fails with verify_peer and no matching CA", %{port: port} do
+      {:ok, tcp_socket} = :gen_tcp.connect(~c"localhost", port, [:binary, active: false], 5_000)
+
+      assert {:error, error} =
+               SSL.upgrade(tcp_socket, "localhost", port,
+                 verify: :verify_peer,
+                 cacerts: []
+               )
+
+      assert match?(%TLSVerificationFailed{}, error) or
+               match?(%TLSHandshakeFailed{}, error)
+    end
+
+    test "upgrade negotiates ALPN protocol", %{port: port} do
+      {:ok, tcp_socket} = :gen_tcp.connect(~c"localhost", port, [:binary, active: false], 5_000)
+
+      {:ok, transport} =
+        SSL.upgrade(tcp_socket, "localhost", port, verify: :verify_none)
+
+      assert SSL.negotiated_protocol(transport) == nil
+    end
+  end
+
   describe "negotiated_protocol/1" do
     test "returns nil when no ALPN negotiated", %{port: port} do
       {:ok, transport} = SSL.connect("localhost", port, verify: :verify_none)

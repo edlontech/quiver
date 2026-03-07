@@ -119,3 +119,16 @@ defmodule Quiver.Error.StreamError do
 
   def message(%{reason: reason}), do: "stream error: #{inspect(reason)}"
 end
+
+defmodule Quiver.Error.ProxyConnectFailed do
+  @moduledoc """
+  Proxy CONNECT tunnel establishment failed with a non-2xx status.
+  """
+
+  use Splode.Error, fields: [:status, :target], class: :transient
+  @type t :: Splode.Error.t()
+
+  def message(%{status: status, target: target}) do
+    "proxy CONNECT to #{target} failed with status #{status}"
+  end
+end

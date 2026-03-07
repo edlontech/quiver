@@ -133,7 +133,9 @@ defmodule Quiver.Pool.HTTP2Test do
                  :post,
                  "/large",
                  [{"content-type", "application/octet-stream"}],
-                 body, receive_timeout: 10_000)
+                 body,
+                 receive_timeout: 10_000
+               )
 
       assert response.status == 200
       assert response.body == "received:#{1_024 * 128}"

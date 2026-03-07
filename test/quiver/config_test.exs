@@ -129,6 +129,55 @@ defmodule Quiver.ConfigTest do
       assert {:ok, opts} = Config.validate_pool(cacerts: :default)
       assert opts[:cacerts] == :default
     end
+
+    test "accepts proxy config with host and port" do
+      assert {:ok, opts} =
+               Config.validate_pool(proxy: [host: "proxy.example.com", port: 8080])
+
+      assert opts[:proxy][:host] == "proxy.example.com"
+      assert opts[:proxy][:port] == 8080
+      assert opts[:proxy][:scheme] == :http
+      assert opts[:proxy][:headers] == []
+    end
+
+    test "accepts proxy config with all options" do
+      assert {:ok, opts} =
+               Config.validate_pool(
+                 proxy: [
+                   host: "proxy.example.com",
+                   port: 3128,
+                   scheme: :https,
+                   headers: [{"proxy-authorization", "Basic abc"}]
+                 ]
+               )
+
+      assert opts[:proxy][:scheme] == :https
+      assert opts[:proxy][:headers] == [{"proxy-authorization", "Basic abc"}]
+    end
+
+    test "defaults proxy to nil when not provided" do
+      assert {:ok, opts} = Config.validate_pool([])
+      assert opts[:proxy] == nil
+    end
+
+    test "rejects proxy with missing host" do
+      assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(proxy: [port: 8080])
+    end
+
+    test "rejects proxy with missing port" do
+      assert {:error, %InvalidPoolOpts{}} =
+               Config.validate_pool(proxy: [host: "proxy.example.com"])
+    end
+
+    test "rejects proxy with port out of range" do
+      assert {:error, %InvalidPoolOpts{}} =
+               Config.validate_pool(proxy: [host: "proxy.example.com", port: 70_000])
+    end
+
+    test "rejects proxy with invalid scheme" do
+      assert {:error, %InvalidPoolOpts{}} =
+               Config.validate_pool(proxy: [host: "proxy.example.com", port: 8080, scheme: :ftp])
+    end
   end
 
   describe "parse_rules/1" do

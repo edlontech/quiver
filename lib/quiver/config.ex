@@ -82,7 +82,27 @@ defmodule Quiver.Config do
             alpn_advertised_protocols:
               Zoi.array(Zoi.string(), description: "ALPN protocols to advertise during TLS.")
               |> Zoi.optional()
-              |> Zoi.default([])
+              |> Zoi.default([]),
+            proxy:
+              Zoi.keyword(
+                host:
+                  Zoi.string(description: "Proxy hostname.")
+                  |> Zoi.required(),
+                port:
+                  Zoi.integer(description: "Proxy port.")
+                  |> Zoi.gte(1)
+                  |> Zoi.lte(65_535)
+                  |> Zoi.required(),
+                scheme:
+                  Zoi.enum([:http, :https], description: "Proxy connection scheme.")
+                  |> Zoi.optional()
+                  |> Zoi.default(:http),
+                headers:
+                  Zoi.any(description: "Extra headers for proxy (e.g. Proxy-Authorization).")
+                  |> Zoi.optional()
+                  |> Zoi.default([])
+              )
+              |> Zoi.optional()
           )
 
   @doc false

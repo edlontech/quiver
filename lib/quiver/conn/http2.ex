@@ -303,7 +303,8 @@ defmodule Quiver.Conn.HTTP2 do
 
   # -- Handshake --
 
-  defp perform_handshake(conn) do
+  @doc false
+  def perform_handshake(conn) do
     client_settings = settings_to_pairs(conn.client_settings)
 
     {window_frame, recv_window} =

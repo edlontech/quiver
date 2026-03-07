@@ -13,8 +13,10 @@ defmodule Quiver.Pool.HTTP1 do
   alias Quiver.Conn.HTTP1
   alias Quiver.Error.CheckoutTimeout
   alias Quiver.Error.StreamError
+  alias Quiver.Proxy
   alias Quiver.StreamResponse
   alias Quiver.Telemetry
+  alias Quiver.Transport.SSL
 
   defstruct [:origin, :config, :stats_table]
 
@@ -403,21 +405,25 @@ defmodule Quiver.Pool.HTTP1 do
   end
 
   defp instrumented_connect({scheme, host, port} = origin, config) do
-    uri = %URI{scheme: to_string(scheme), host: host, port: port}
     start_time = System.monotonic_time()
     conn_meta = %{origin: origin, scheme: scheme}
 
     Telemetry.event([:quiver, :conn, :start], %{system_time: System.system_time()}, conn_meta)
 
-    case HTTP1.connect(uri, config) do
+    result =
+      case Keyword.get(config, :proxy) do
+        nil -> direct_connect(scheme, host, port, config)
+        proxy_config -> proxy_connect(scheme, host, port, config, proxy_config)
+      end
+
+    duration = System.monotonic_time() - start_time
+
+    case result do
       {:ok, conn} ->
-        duration = System.monotonic_time() - start_time
         Telemetry.event([:quiver, :conn, :stop], %{duration: duration}, conn_meta)
         {:ok, conn}
 
       {:error, reason} ->
-        duration = System.monotonic_time() - start_time
-
         Telemetry.event(
           [:quiver, :conn, :stop],
           %{duration: duration},
@@ -426,6 +432,43 @@ defmodule Quiver.Pool.HTTP1 do
 
         {:error, reason}
     end
+  end
+
+  defp direct_connect(scheme, host, port, config) do
+    uri = %URI{scheme: to_string(scheme), host: host, port: port}
+    HTTP1.connect(uri, config)
+  end
+
+  defp proxy_connect(:https, host, port, config, proxy_config) do
+    proxy_host = Keyword.fetch!(proxy_config, :host)
+    proxy_port = Keyword.fetch!(proxy_config, :port)
+    proxy_headers = Keyword.get(proxy_config, :headers, [])
+    connect_timeout = Keyword.get(config, :connect_timeout, 5_000)
+
+    proxy_opts = [
+      headers: proxy_headers,
+      connect_timeout: connect_timeout
+    ]
+
+    with {:ok, tcp_transport} <-
+           Proxy.connect_tunnel(proxy_host, proxy_port, host, port, proxy_opts),
+         {:ok, ssl_transport} <- SSL.upgrade(tcp_transport.socket, host, port, config) do
+      recv_timeout = Keyword.get(config, :recv_timeout, 15_000)
+
+      {:ok,
+       %HTTP1{
+         transport: ssl_transport,
+         transport_mod: SSL,
+         host: host,
+         port: port,
+         scheme: :https,
+         recv_timeout: recv_timeout
+       }}
+    end
+  end
+
+  defp proxy_connect(:http, host, port, config, _proxy_config) do
+    direct_connect(:http, host, port, config)
   end
 
   defp emit_conn_close(origin, reason) do
