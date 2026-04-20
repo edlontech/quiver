@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/edlontech/quiver/compare/v0.2.0...v0.2.1) (2026-04-20)
+
+
+### Bug Fixes
+
+* Update Deps and getting rid of Typedstruct ([5798f23](https://github.com/edlontech/quiver/commit/5798f235ad15dde98d0f0d2e0fb020f36681cd7c))
+
 ## [0.2.0](https://github.com/edlontech/quiver/compare/v0.1.3...v0.2.0) (2026-03-07)
 
 
