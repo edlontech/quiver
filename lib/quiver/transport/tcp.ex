@@ -5,17 +5,18 @@ defmodule Quiver.Transport.TCP do
 
   @behaviour Quiver.Transport
 
-  use TypedStruct
-
   alias Quiver.Error.ConnectionClosed
   alias Quiver.Error.ConnectionFailed
   alias Quiver.Error.ConnectionRefused
   alias Quiver.Error.DNSResolutionFailed
   alias Quiver.Error.Timeout
 
-  typedstruct do
-    field(:socket, :gen_tcp.socket(), enforce: true)
-  end
+  @enforce_keys [:socket]
+  defstruct [:socket]
+
+  @type t :: %__MODULE__{
+          socket: :gen_tcp.socket()
+        }
 
   @impl true
   def connect(host, port, opts) do

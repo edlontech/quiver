@@ -3,12 +3,13 @@ defmodule Quiver.Request do
   HTTP request data container.
   """
 
-  use TypedStruct
+  @enforce_keys [:method, :url]
+  defstruct [:method, :url, headers: [], body: nil]
 
-  typedstruct do
-    field(:method, atom(), enforce: true)
-    field(:url, URI.t(), enforce: true)
-    field(:headers, [{String.t(), String.t()}], default: [])
-    field(:body, iodata() | nil | {:stream, Enumerable.t()}, default: nil)
-  end
+  @type t :: %__MODULE__{
+          method: atom(),
+          url: URI.t(),
+          headers: [{String.t(), String.t()}],
+          body: iodata() | nil | {:stream, Enumerable.t()}
+        }
 end

@@ -8,8 +8,6 @@ defmodule Quiver.Conn.HTTP2 do
 
   @behaviour Quiver.Conn
 
-  use TypedStruct
-
   alias Quiver.Conn.HTTP2.Frame
   alias Quiver.Error.CompressionError
   alias Quiver.Error.ConnectionClosed
@@ -31,52 +29,68 @@ defmodule Quiver.Conn.HTTP2 do
   @rfc_default_window_size 65_535
   @window_update_ratio 0.5
 
-  typedstruct do
-    field(:transport, Transport.t(), enforce: true)
-    field(:transport_mod, module(), enforce: true)
-    field(:host, String.t(), enforce: true)
-    field(:port, :inet.port_number(), enforce: true)
-    field(:scheme, :http | :https, enforce: true)
+  @enforce_keys [:transport, :transport_mod, :host, :port, :scheme]
+  defstruct [
+    :transport,
+    :transport_mod,
+    :host,
+    :port,
+    :scheme,
+    :encode_table,
+    :decode_table,
+    state: :handshaking,
+    buffer: "",
+    streams: %{},
+    next_stream_id: 1,
+    ref_to_stream_id: %{},
+    send_window: @default_initial_window_size,
+    recv_window: @default_initial_window_size,
+    recv_window_consumed: 0,
+    server_settings: %{},
+    client_settings: %{
+      header_table_size: @default_header_table_size,
+      enable_push: 0,
+      max_concurrent_streams: @default_max_concurrent_streams,
+      initial_window_size: @default_initial_window_size,
+      max_frame_size: @default_max_frame_size
+    },
+    settings_queue: :queue.new(),
+    ping_queue: :queue.new(),
+    recv_timeout: @default_recv_timeout,
+    open_stream_count: 0,
+    cached_max_frame_size: @default_max_frame_size,
+    cached_initial_window_size: @default_initial_window_size,
+    received_server_settings?: false,
+    headers_being_processed: nil
+  ]
 
-    field(:state, :handshaking | :open | :goaway | :closed, default: :handshaking)
-    field(:buffer, binary(), default: "")
-
-    field(:encode_table, HPAX.Table.t())
-    field(:decode_table, HPAX.Table.t())
-
-    field(:streams, map(), default: %{})
-    field(:next_stream_id, pos_integer(), default: 1)
-    field(:ref_to_stream_id, map(), default: %{})
-
-    field(:send_window, integer(), default: @default_initial_window_size)
-    field(:recv_window, integer(), default: @default_initial_window_size)
-    field(:recv_window_consumed, non_neg_integer(), default: 0)
-
-    field(:server_settings, map(), default: %{})
-
-    field(:client_settings, map(),
-      default: %{
-        header_table_size: @default_header_table_size,
-        enable_push: 0,
-        max_concurrent_streams: @default_max_concurrent_streams,
-        initial_window_size: @default_initial_window_size,
-        max_frame_size: @default_max_frame_size
-      }
-    )
-
-    field(:settings_queue, :queue.queue(), default: :queue.new())
-
-    field(:ping_queue, :queue.queue(), default: :queue.new())
-    field(:recv_timeout, timeout(), default: @default_recv_timeout)
-
-    field(:open_stream_count, non_neg_integer(), default: 0)
-
-    field(:cached_max_frame_size, pos_integer(), default: @default_max_frame_size)
-    field(:cached_initial_window_size, pos_integer(), default: @default_initial_window_size)
-
-    field(:received_server_settings?, boolean(), default: false)
-    field(:headers_being_processed, {pos_integer(), iolist(), boolean()} | nil, default: nil)
-  end
+  @type t :: %__MODULE__{
+          transport: Transport.t(),
+          transport_mod: module(),
+          host: String.t(),
+          port: :inet.port_number(),
+          scheme: :http | :https,
+          state: :handshaking | :open | :goaway | :closed,
+          buffer: binary(),
+          encode_table: HPAX.Table.t() | nil,
+          decode_table: HPAX.Table.t() | nil,
+          streams: map(),
+          next_stream_id: pos_integer(),
+          ref_to_stream_id: map(),
+          send_window: integer(),
+          recv_window: integer(),
+          recv_window_consumed: non_neg_integer(),
+          server_settings: map(),
+          client_settings: map(),
+          settings_queue: :queue.queue(),
+          ping_queue: :queue.queue(),
+          recv_timeout: timeout(),
+          open_stream_count: non_neg_integer(),
+          cached_max_frame_size: pos_integer(),
+          cached_initial_window_size: pos_integer(),
+          received_server_settings?: boolean(),
+          headers_being_processed: {pos_integer(), iolist(), boolean()} | nil
+        }
 
   # -- Quiver.Conn callbacks --
 

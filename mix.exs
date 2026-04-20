@@ -155,7 +155,6 @@ defmodule Quiver.MixProject do
       {:tesla, "~> 1.16", optional: true},
       {:testcontainers, "~> 1.13", only: [:test, :dev]},
       {:tidewave, "~> 0.5", only: :dev, runtime: false},
-      {:typedstruct, "~> 0.5"},
       {:zoi, "~> 0.11"}
     ]
   end

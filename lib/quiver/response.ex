@@ -3,12 +3,13 @@ defmodule Quiver.Response do
   HTTP response data container.
   """
 
-  use TypedStruct
+  @enforce_keys [:status]
+  defstruct [:status, headers: [], body: nil, trailers: []]
 
-  typedstruct do
-    field(:status, non_neg_integer(), enforce: true)
-    field(:headers, [{String.t(), String.t()}], default: [])
-    field(:body, iodata() | nil, default: nil)
-    field(:trailers, [{String.t(), String.t()}], default: [])
-  end
+  @type t :: %__MODULE__{
+          status: non_neg_integer(),
+          headers: [{String.t(), String.t()}],
+          body: iodata() | nil,
+          trailers: [{String.t(), String.t()}]
+        }
 end

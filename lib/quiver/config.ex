@@ -1,14 +1,16 @@
 defmodule Quiver.Config.Rule do
   @moduledoc "A parsed pool routing rule with origin pattern and pool configuration."
-  use TypedStruct
 
-  typedstruct do
-    field(:type, :exact | :wildcard | :default, enforce: true)
-    field(:scheme, :https | :http)
-    field(:host_pattern, [String.t() | :wildcard])
-    field(:port, :inet.port_number())
-    field(:config, keyword(), default: [])
-  end
+  @enforce_keys [:type]
+  defstruct [:type, :scheme, :host_pattern, :port, config: []]
+
+  @type t :: %__MODULE__{
+          type: :exact | :wildcard | :default,
+          scheme: :https | :http | nil,
+          host_pattern: [String.t() | :wildcard] | nil,
+          port: :inet.port_number() | nil,
+          config: keyword()
+        }
 end
 
 defmodule Quiver.Config do

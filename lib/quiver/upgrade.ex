@@ -6,12 +6,16 @@ defmodule Quiver.Upgrade do
   transport socket for the caller to use with the upgraded protocol.
   """
 
-  use TypedStruct
+  @enforce_keys [:transport, :transport_mod]
+  defstruct status: 101,
+            headers: [],
+            transport: nil,
+            transport_mod: nil
 
-  typedstruct do
-    field(:status, 101, default: 101)
-    field(:headers, [{String.t(), String.t()}], default: [])
-    field(:transport, Quiver.Transport.t(), enforce: true)
-    field(:transport_mod, module(), enforce: true)
-  end
+  @type t :: %__MODULE__{
+          status: 101,
+          headers: [{String.t(), String.t()}],
+          transport: Quiver.Transport.t(),
+          transport_mod: module()
+        }
 end

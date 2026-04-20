@@ -9,15 +9,14 @@ defmodule Quiver.StreamResponse do
   coordination. Callers should not depend on its value.
   """
 
-  use TypedStruct
+  @enforce_keys [:status, :headers, :body, :ref]
+  defstruct [:status, :headers, :body, :ref, trailers: []]
 
-  typedstruct do
-    field(:status, non_neg_integer(), enforce: true)
-    field(:headers, [{String.t(), String.t()}], enforce: true)
-    field(:body, Enumerable.t(), enforce: true)
-    field(:trailers, [{String.t(), String.t()}], default: [])
-
-    @typedoc false
-    field(:ref, reference(), enforce: true)
-  end
+  @type t :: %__MODULE__{
+          status: non_neg_integer(),
+          headers: [{String.t(), String.t()}],
+          body: Enumerable.t(),
+          trailers: [{String.t(), String.t()}],
+          ref: reference()
+        }
 end

@@ -8,8 +8,6 @@ defmodule Quiver.Conn.HTTP1 do
 
   @behaviour Quiver.Conn
 
-  use TypedStruct
-
   alias Quiver.Conn.HTTP1.Parse
   alias Quiver.Conn.HTTP1.Request, as: RequestEncoder
   alias Quiver.Error.ConnectionClosed
@@ -20,20 +18,36 @@ defmodule Quiver.Conn.HTTP1 do
 
   @default_recv_timeout 15_000
 
-  typedstruct do
-    field(:transport, Transport.t(), enforce: true)
-    field(:transport_mod, module(), enforce: true)
-    field(:host, String.t(), enforce: true)
-    field(:port, :inet.port_number(), enforce: true)
-    field(:scheme, :http | :https, enforce: true)
-    field(:buffer, binary(), default: "")
-    field(:parse_state, Parse.parse_state(), default: :idle)
-    field(:keep_alive, boolean(), default: true)
-    field(:request_state, :idle | :in_flight, default: :idle)
-    field(:closed, boolean(), default: false)
-    field(:recv_timeout, timeout(), default: @default_recv_timeout)
-    field(:request_ref, reference() | nil, default: nil)
-  end
+  @enforce_keys [:transport, :transport_mod, :host, :port, :scheme]
+  defstruct [
+    :transport,
+    :transport_mod,
+    :host,
+    :port,
+    :scheme,
+    buffer: "",
+    parse_state: :idle,
+    keep_alive: true,
+    request_state: :idle,
+    closed: false,
+    recv_timeout: @default_recv_timeout,
+    request_ref: nil
+  ]
+
+  @type t :: %__MODULE__{
+          transport: Transport.t(),
+          transport_mod: module(),
+          host: String.t(),
+          port: :inet.port_number(),
+          scheme: :http | :https,
+          buffer: binary(),
+          parse_state: Parse.parse_state(),
+          keep_alive: boolean(),
+          request_state: :idle | :in_flight,
+          closed: boolean(),
+          recv_timeout: timeout(),
+          request_ref: reference() | nil
+        }
 
   @impl true
   def connect(%URI{scheme: scheme, host: host, port: port}, opts)

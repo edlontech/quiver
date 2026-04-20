@@ -8,8 +8,6 @@ defmodule Quiver.Transport.SSL do
 
   @behaviour Quiver.Transport
 
-  use TypedStruct
-
   alias Quiver.Error.ConnectionClosed
   alias Quiver.Error.ConnectionFailed
   alias Quiver.Error.ConnectionRefused
@@ -18,10 +16,13 @@ defmodule Quiver.Transport.SSL do
   alias Quiver.Error.TLSHandshakeFailed
   alias Quiver.Error.TLSVerificationFailed
 
-  typedstruct do
-    field(:socket, :ssl.sslsocket(), enforce: true)
-    field(:negotiated_protocol, binary() | nil, default: nil)
-  end
+  @enforce_keys [:socket]
+  defstruct [:socket, negotiated_protocol: nil]
+
+  @type t :: %__MODULE__{
+          socket: :ssl.sslsocket(),
+          negotiated_protocol: binary() | nil
+        }
 
   @impl true
   def connect(host, port, opts) do
