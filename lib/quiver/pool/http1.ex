@@ -18,6 +18,7 @@ defmodule Quiver.Pool.HTTP1 do
   alias Quiver.Telemetry
   alias Quiver.Transport.SSL
 
+  @derive {Inspect, only: [:origin]}
   defstruct [:origin, :config, :stats_table]
 
   @type t :: %__MODULE__{

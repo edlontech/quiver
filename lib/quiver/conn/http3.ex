@@ -390,4 +390,25 @@ defmodule Quiver.Conn.HTTP3 do
       trailers: trailers
     }
   end
+
+  defimpl Inspect do
+    import Inspect.Algebra
+
+    def inspect(conn, opts) do
+      fields = [
+        scheme: conn.scheme,
+        host: conn.host,
+        port: conn.port,
+        h3_conn: conn.h3_conn,
+        peer_max_streams: conn.peer_max_streams,
+        open_streams: map_size(conn.ref_to_stream_id)
+      ]
+
+      container_doc("#Quiver.Conn.HTTP3<", fields, ">", opts, &keyword_field/2, separator: ",")
+    end
+
+    defp keyword_field({key, value}, opts) do
+      concat([Atom.to_string(key), ": ", to_doc(value, opts)])
+    end
+  end
 end

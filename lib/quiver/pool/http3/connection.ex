@@ -923,4 +923,31 @@ defmodule Quiver.Pool.HTTP3.Connection do
   defp cancel_idle_timer(%{idle_timer: nil}), do: :ok
   defp cancel_idle_timer(%{idle_timer: timer}), do: Process.cancel_timer(timer)
   defp cancel_idle_timer(_), do: :ok
+
+  defimpl Inspect do
+    import Inspect.Algebra
+
+    def inspect(data, opts) do
+      fields = [
+        origin: data.origin,
+        h3_conn: data.h3_conn,
+        requests: map_size(data.requests),
+        peer_max_streams: data.peer_max_streams,
+        goaway_id: data.goaway_id
+      ]
+
+      container_doc(
+        "#Quiver.Pool.HTTP3.Connection<",
+        fields,
+        ">",
+        opts,
+        &keyword_field/2,
+        separator: ","
+      )
+    end
+
+    defp keyword_field({key, value}, opts) do
+      concat([Atom.to_string(key), ": ", to_doc(value, opts)])
+    end
+  end
 end

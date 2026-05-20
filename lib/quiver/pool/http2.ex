@@ -493,4 +493,23 @@ defmodule Quiver.Pool.HTTP2 do
   end
 
   defp format_origin({scheme, host, port}), do: "#{scheme}://#{host}:#{port}"
+
+  defimpl Inspect do
+    import Inspect.Algebra
+
+    def inspect(data, opts) do
+      fields = [
+        origin: data.origin,
+        connections: map_size(data.connections),
+        max_connections: data.max_connections,
+        waiting: :queue.len(data.waiting)
+      ]
+
+      container_doc("#Quiver.Pool.HTTP2<", fields, ">", opts, &keyword_field/2, separator: ",")
+    end
+
+    defp keyword_field({key, value}, opts) do
+      concat([Atom.to_string(key), ": ", to_doc(value, opts)])
+    end
+  end
 end

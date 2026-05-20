@@ -887,4 +887,30 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
     %Response{status: status, headers: headers, body: body, trailers: trailers}
   end
+
+  defimpl Inspect do
+    import Inspect.Algebra
+
+    def inspect(data, opts) do
+      fields = [
+        origin: data.origin,
+        conn: data.conn,
+        requests: map_size(data.requests),
+        write_queue: length(data.write_queue)
+      ]
+
+      container_doc(
+        "#Quiver.Pool.HTTP2.Connection<",
+        fields,
+        ">",
+        opts,
+        &keyword_field/2,
+        separator: ","
+      )
+    end
+
+    defp keyword_field({key, value}, opts) do
+      concat([Atom.to_string(key), ": ", to_doc(value, opts)])
+    end
+  end
 end

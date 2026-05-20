@@ -16,6 +16,7 @@ defmodule Quiver.Transport.SSL do
   alias Quiver.Error.TLSHandshakeFailed
   alias Quiver.Error.TLSVerificationFailed
 
+  @derive {Inspect, only: [:negotiated_protocol]}
   @enforce_keys [:socket]
   defstruct [:socket, negotiated_protocol: nil]
 

@@ -29,6 +29,17 @@ defmodule Quiver.Conn.HTTP2 do
   @rfc_default_window_size 65_535
   @window_update_ratio 0.5
 
+  @derive {Inspect,
+           only: [
+             :scheme,
+             :host,
+             :port,
+             :state,
+             :open_stream_count,
+             :next_stream_id,
+             :send_window,
+             :recv_window
+           ]}
   @enforce_keys [:transport, :transport_mod, :host, :port, :scheme]
   defstruct [
     :transport,

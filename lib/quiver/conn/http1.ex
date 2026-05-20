@@ -18,6 +18,7 @@ defmodule Quiver.Conn.HTTP1 do
 
   @default_recv_timeout 15_000
 
+  @derive {Inspect, only: [:scheme, :host, :port, :request_state, :keep_alive, :closed]}
   @enforce_keys [:transport, :transport_mod, :host, :port, :scheme]
   defstruct [
     :transport,
