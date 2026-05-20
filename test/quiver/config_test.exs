@@ -65,7 +65,7 @@ defmodule Quiver.ConfigTest do
     end
 
     test "rejects invalid protocol" do
-      assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(protocol: :http3)
+      assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(protocol: :http9)
     end
 
     test "defaults max_connections to 1" do
@@ -177,6 +177,45 @@ defmodule Quiver.ConfigTest do
     test "rejects proxy with invalid scheme" do
       assert {:error, %InvalidPoolOpts{}} =
                Config.validate_pool(proxy: [host: "proxy.example.com", port: 8080, scheme: :ftp])
+    end
+  end
+
+  describe ":http3 protocol option" do
+    test "is accepted as a protocol value" do
+      assert {:ok, opts} = Config.validate_pool(protocol: :http3)
+      assert Keyword.get(opts, :protocol) == :http3
+    end
+
+    test "rejects :http3 + proxy" do
+      opts = [protocol: :http3, proxy: [host: "p", port: 1080]]
+      assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(opts)
+    end
+
+    test "rejects :http3 on http:// rule key" do
+      pools = %{"http://insecure.example.com" => [protocol: :http3]}
+      assert {:error, %InvalidPoolRule{}} = Config.parse_rules(pools)
+    end
+
+    test "accepts :http3 on https:// rule key" do
+      pools = %{"https://secure.example.com" => [protocol: :http3]}
+      assert {:ok, [%Rule{}]} = Config.parse_rules(pools)
+    end
+
+    test "passes through quic_opts and h3_settings" do
+      opts = [
+        protocol: :http3,
+        quic_opts: %{max_idle_timeout: 60_000},
+        h3_settings: %{qpack_max_table_capacity: 4096}
+      ]
+
+      assert {:ok, validated} = Config.validate_pool(opts)
+      assert Keyword.get(validated, :quic_opts) == %{max_idle_timeout: 60_000}
+      assert Keyword.get(validated, :h3_settings) == %{qpack_max_table_capacity: 4096}
+    end
+
+    test "defaults initial_max_streams to 100" do
+      assert {:ok, opts} = Config.validate_pool([])
+      assert Keyword.get(opts, :initial_max_streams) == 100
     end
   end
 

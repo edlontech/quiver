@@ -1,6 +1,7 @@
 defmodule Quiver do
   @moduledoc """
-  A mid-level HTTP client for Elixir supporting HTTP/1.1 and HTTP/2.
+  A fast, resilient HTTP client for Elixir with built-in connection pooling,
+  HTTP/2 multiplexing, HTTP/3 over QUIC, and streaming support.
 
   ## Usage
 
@@ -22,6 +23,7 @@ defmodule Quiver do
 
   alias Quiver.Pool.HTTP1, as: PoolHTTP1
   alias Quiver.Pool.HTTP2, as: PoolHTTP2
+  alias Quiver.Pool.HTTP3, as: PoolHTTP3
   alias Quiver.Pool.Manager
   alias Quiver.Request
   alias Quiver.Response
@@ -223,7 +225,11 @@ defmodule Quiver do
   end
 
   defp detect_pool_module(pool) do
-    if pool_registered?(PoolHTTP2, pool), do: PoolHTTP2, else: PoolHTTP1
+    cond do
+      pool_registered?(PoolHTTP3, pool) -> PoolHTTP3
+      pool_registered?(PoolHTTP2, pool) -> PoolHTTP2
+      true -> PoolHTTP1
+    end
   end
 
   defp pool_registered?(module, pool) do

@@ -44,8 +44,9 @@ defmodule Quiver.Config do
               |> Zoi.optional()
               |> Zoi.default(5_000),
             protocol:
-              Zoi.enum([:auto, :http1, :http2],
-                description: "HTTP protocol version. :auto detects via ALPN negotiation."
+              Zoi.enum([:auto, :http1, :http2, :http3],
+                description:
+                  "HTTP protocol version. :auto detects via ALPN negotiation. :http3 requires explicit configuration."
               )
               |> Zoi.optional()
               |> Zoi.default(:auto),
@@ -54,6 +55,23 @@ defmodule Quiver.Config do
               |> Zoi.gte(1)
               |> Zoi.optional()
               |> Zoi.default(1),
+            quic_opts:
+              Zoi.any(description: "Map of options passed through to quic_h3:connect/3.")
+              |> Zoi.optional()
+              |> Zoi.default(%{}),
+            h3_settings:
+              Zoi.any(
+                description: "Map of HTTP/3 SETTINGS overrides (qpack_max_table_capacity, etc.)."
+              )
+              |> Zoi.optional()
+              |> Zoi.default(%{}),
+            initial_max_streams:
+              Zoi.integer(
+                description: "Local cap on outgoing concurrent H3 streams per connection."
+              )
+              |> Zoi.gte(1)
+              |> Zoi.optional()
+              |> Zoi.default(100),
             connect_timeout:
               Zoi.integer(description: "TCP/TLS connect timeout in ms.")
               |> Zoi.gte(1)
@@ -120,8 +138,25 @@ defmodule Quiver.Config do
   @spec validate_pool(pool_opts()) :: {:ok, pool_opts()} | {:error, InvalidPoolOpts.t()}
   def validate_pool(opts) do
     case Zoi.parse(@schema, opts) do
-      {:ok, validated} -> {:ok, validated}
+      {:ok, validated} -> check_h3_constraints(validated)
       {:error, errors} -> {:error, to_pool_error(errors)}
+    end
+  end
+
+  defp check_h3_constraints(opts) do
+    if Keyword.get(opts, :protocol) == :http3 and proxy_configured?(opts) do
+      {:error,
+       InvalidPoolOpts.exception(errors: ["proxy is not supported with protocol: :http3 in v1"])}
+    else
+      {:ok, opts}
+    end
+  end
+
+  defp proxy_configured?(opts) do
+    case Keyword.get(opts, :proxy) do
+      nil -> false
+      [] -> false
+      _ -> true
     end
   end
 
@@ -167,7 +202,8 @@ defmodule Quiver.Config do
 
     with :ok <- validate_scheme(uri.scheme, key),
          {:ok, host_pattern, type} <- parse_host(uri.host, key),
-         {:ok, validated} <- validate_pool(config) do
+         {:ok, validated} <- validate_pool(config),
+         :ok <- validate_http3_scheme(validated, uri.scheme, key) do
       port = uri.port || default_port(uri.scheme)
 
       {:ok,
@@ -184,6 +220,20 @@ defmodule Quiver.Config do
   defp parse_rule(key, _config) do
     {:error, InvalidPoolRule.exception(rule: key, reason: "key must be a URI string or :default")}
   end
+
+  defp validate_http3_scheme(opts, "http", key) do
+    if Keyword.get(opts, :protocol) == :http3 do
+      {:error,
+       InvalidPoolRule.exception(
+         rule: key,
+         reason: "http:// scheme cannot be used with protocol: :http3 - HTTP/3 is HTTPS-only"
+       )}
+    else
+      :ok
+    end
+  end
+
+  defp validate_http3_scheme(_opts, _scheme, _key), do: :ok
 
   defp validate_scheme(scheme, _key) when scheme in ["http", "https"], do: :ok
 

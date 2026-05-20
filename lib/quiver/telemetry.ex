@@ -20,6 +20,13 @@ defmodule Quiver.Telemetry do
   ## Pool Queue
 
   - `[:quiver, :pool, :queue]` -- measurements: `queue_length` | metadata: `origin, name`
+
+  ## HTTP/3 Connection
+
+  - `[:quiver, :connection, :http3, :start]` -- measurements: `system_time` | metadata: `origin, pool_pid`
+  - `[:quiver, :connection, :http3, :stop]` -- measurements: `duration` | metadata: `origin, peer_max_streams`
+  - `[:quiver, :connection, :http3, :exception]` -- measurements: `duration` | metadata: `origin, reason, kind`
+  - `[:quiver, :connection, :http3, :draining]` -- measurements: `system_time` | metadata: `origin, last_stream_id, error_code`
   """
 
   @doc false
@@ -37,6 +44,10 @@ defmodule Quiver.Telemetry do
   @doc false
   @spec pool_queue_event() :: [atom()]
   def pool_queue_event, do: [:quiver, :pool, :queue]
+
+  @doc false
+  @spec connection_http3_event_prefix() :: [atom()]
+  def connection_http3_event_prefix, do: [:quiver, :connection, :http3]
 
   @doc false
   @spec span([atom()], map(), (-> {result, map()})) :: result when result: term()

@@ -60,6 +60,7 @@ defmodule Quiver.MixProject do
           {"guides/architecture.md", title: "Architecture"},
           {"guides/error-handling.md", title: "Error Handling"},
           {"guides/telemetry.md", title: "Telemetry"},
+          {"guides/http3.md", title: "HTTP/3"},
           {"CHANGELOG.md", title: "Changelog"},
           {"LICENSE", title: "License"}
         ] ++ benchmark_extras,
@@ -68,7 +69,8 @@ defmodule Quiver.MixProject do
           "guides/getting-started.md",
           "guides/architecture.md",
           "guides/error-handling.md",
-          "guides/telemetry.md"
+          "guides/telemetry.md",
+          "guides/http3.md"
         ],
         Benchmarks: ~r/guides\/benchmarks\/.+/,
         About: [
@@ -103,13 +105,16 @@ defmodule Quiver.MixProject do
           Quiver.Pool.Manager,
           Quiver.Pool.HTTP1,
           Quiver.Pool.HTTP2,
-          Quiver.Pool.HTTP2.Connection
+          Quiver.Pool.HTTP2.Connection,
+          Quiver.Pool.HTTP3,
+          Quiver.Pool.HTTP3.Connection
         ],
         Connections: [
           Quiver.Conn,
           Quiver.Conn.HTTP1,
           Quiver.Conn.HTTP2,
-          ~r/Quiver\.Conn\.HTTP[12]\./
+          Quiver.Conn.HTTP3,
+          ~r/Quiver\.Conn\.HTTP[123]\./
         ],
         Transports: [
           Quiver.Transport,
@@ -155,6 +160,7 @@ defmodule Quiver.MixProject do
       {:tesla, "~> 1.16", optional: true},
       {:testcontainers, "~> 1.13", only: [:test, :dev]},
       {:tidewave, "~> 0.5", only: :dev, runtime: false},
+      {:quic, "~> 1.3"},
       {:zoi, "~> 0.11"}
     ]
   end
@@ -170,6 +176,7 @@ defmodule Quiver.MixProject do
       "bench.streaming": ["run bench/streaming.exs"],
       "bench.vs_finch": ["run bench/vs_finch.exs"],
       "bench.vs_tesla": ["run bench/vs_tesla.exs"],
+      "bench.http3": ["run bench/http3.exs"],
       "bench.all": [
         "bench.concurrency",
         "bench.payload",
@@ -177,7 +184,8 @@ defmodule Quiver.MixProject do
         "bench.profile_payload",
         "bench.streaming",
         "bench.vs_finch",
-        "bench.vs_tesla"
+        "bench.vs_tesla",
+        "bench.http3"
       ]
     ]
   end

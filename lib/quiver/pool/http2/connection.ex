@@ -13,6 +13,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
   alias Quiver.Conn.HTTP2, as: H2
   alias Quiver.Error.ProtocolViolation
+  alias Quiver.Error.StreamError
   alias Quiver.Proxy
   alias Quiver.Response
   alias Quiver.Transport.SSL
@@ -369,6 +370,10 @@ defmodule Quiver.Pool.HTTP2.Connection do
     end
   end
 
+  def connected(:info, {:stream_chunk_error, stream_id, reason}, data) do
+    handle_stream_chunk_error(data, stream_id, reason, :connected)
+  end
+
   def connected(:info, :flush_writes, data) do
     flush_write_queue(data)
   end
@@ -503,6 +508,10 @@ defmodule Quiver.Pool.HTTP2.Connection do
             {:keep_state, %{data | conn: conn}}
         end
     end
+  end
+
+  def draining(:info, {:stream_chunk_error, stream_id, reason}, data) do
+    handle_stream_chunk_error(data, stream_id, reason, :draining)
   end
 
   def draining(:info, :flush_writes, data) do
@@ -810,6 +819,43 @@ defmodule Quiver.Pool.HTTP2.Connection do
   defp cancel_idle_timer(%{idle_timer: timer}), do: Process.cancel_timer(timer)
   defp cancel_idle_timer(_), do: :ok
 
+  defp handle_stream_chunk_error(data, stream_id, reason, current_state) do
+    with ref when ref != nil <- find_ref_by_stream_id(data.conn, stream_id),
+         {req, requests} when req != nil <- Map.pop(data.requests, ref) do
+      fail_body_stream_request(data, ref, req, requests, reason, current_state)
+    else
+      _ -> maybe_stop_draining(data, current_state)
+    end
+  end
+
+  defp fail_body_stream_request(data, ref, req, requests, reason, current_state) do
+    cancel_idle_timer(req)
+    err = StreamError.exception(reason: {:stream_body_error, reason})
+    reply_stream_error(req, ref, err)
+    mon = req.monitor
+    Process.demonitor(mon, [:flush])
+    conn_result = H2.cancel(data.conn, ref)
+    conn = elem(conn_result, 1)
+    monitors = Map.delete(data.monitors, mon)
+    data = %{data | conn: conn, requests: requests, monitors: monitors}
+    if data.pool_pid, do: send(data.pool_pid, {:stream_done, self()})
+    maybe_stop_draining(data, current_state)
+  end
+
+  defp reply_stream_error(%{mode: :streaming, phase: :awaiting_headers, from: from}, _ref, err) do
+    GenStateMachine.reply(from, {:error, err})
+  end
+
+  defp reply_stream_error(%{mode: :streaming, demand_pid: pid}, ref, err) when pid != nil do
+    send(pid, {:error, ref, err})
+  end
+
+  defp reply_stream_error(%{mode: :streaming}, _ref, _err), do: :ok
+
+  defp reply_stream_error(%{from: from}, _ref, err) do
+    GenStateMachine.reply(from, {:error, err})
+  end
+
   defp stream_enumerable(worker, stream_id, enumerable) do
     Enum.each(enumerable, fn chunk ->
       send(worker, {:stream_chunk, stream_id, chunk})
@@ -817,6 +863,9 @@ defmodule Quiver.Pool.HTTP2.Connection do
     end)
 
     send(worker, {:stream_done, stream_id})
+  catch
+    kind, reason ->
+      send(worker, {:stream_chunk_error, stream_id, {kind, reason, __STACKTRACE__}})
   end
 
   defp find_ref_by_stream_id(conn, stream_id) do

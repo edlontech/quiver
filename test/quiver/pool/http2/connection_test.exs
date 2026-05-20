@@ -404,6 +404,47 @@ defmodule Quiver.Pool.HTTP2.ConnectionTest do
       end
     end
 
+    test "raising enumerable fails the request without killing the worker" do
+      {:ok, %{port: port, cacerts: cacerts}} =
+        start_server(fn conn ->
+          {:ok, _body, conn} = Plug.Conn.read_body(conn)
+          Plug.Conn.send_resp(conn, 200, "ok")
+        end)
+
+      {:ok, worker} =
+        Connection.start_link(
+          origin: {:https, "127.0.0.1", port},
+          config: [verify: :verify_none, cacerts: cacerts]
+        )
+
+      Process.unlink(worker)
+
+      body_stream =
+        Stream.unfold(0, fn
+          0 -> {"first-chunk|", 1}
+          1 -> raise "boom"
+        end)
+
+      tag = make_ref()
+      from = {self(), tag}
+
+      send(
+        worker,
+        {:forward_request, from, :post, "/", [{"content-type", "text/plain"}],
+         {:stream, body_stream}, 15_000}
+      )
+
+      assert_receive {^tag, {:error, %Quiver.Error.StreamError{reason: {:stream_body_error, _}}}},
+                     5_000
+
+      assert Process.alive?(worker), "worker died after body-stream crash"
+
+      assert {:ok, response} =
+               Connection.request(worker, :get, "/", [], nil, receive_timeout: 5_000)
+
+      assert response.status == 200
+    end
+
     test "stream task cleanup on connection close" do
       {:ok, %{port: port, cacerts: cacerts, server: server, agent: agent}} =
         start_server(fn conn ->

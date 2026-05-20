@@ -9,9 +9,9 @@ well-defined interfaces.
 ```
 Quiver.request/3
   |> Pool.Manager.get_pool/2       (stateless lookup / lazy start)
-  |> Pool.request/6                (HTTP1 or HTTP2 pool)
+  |> Pool.request/6                (HTTP1, HTTP2, or HTTP3 pool)
   |> Conn.request/6                (wire protocol)
-  |> Transport.send/recv           (SSL or TCP)
+  |> Transport.send/recv           (SSL, TCP, or QUIC via :quic_h3)
 ```
 
 ## Client API Layer
@@ -33,8 +33,8 @@ existing pool via `Registry`. On the cold path (first request to an origin)
 it starts a new pool under `DynamicSupervisor` and the pool self-registers.
 
 Protocol detection uses `:persistent_term`: each pool writes
-`{PoolModule, pid} => true` on init. The manager checks both keys to
-determine whether to call `Pool.HTTP1` or `Pool.HTTP2`.
+`{PoolModule, pid} => true` on init. The manager checks each registered
+pool module to dispatch to `Pool.HTTP1`, `Pool.HTTP2`, or `Pool.HTTP3`.
 
 ## Pool Layer
 
@@ -69,6 +69,31 @@ the coordinator, which forwards `{:forward_request, from, ...}` to a worker. The
 replies directly to the original caller's `from`, keeping the coordinator out of the
 data path.
 
+### HTTP/3 Pool
+
+`Quiver.Pool.HTTP3` mirrors the HTTP/2 two-level architecture:
+
+1. **Coordinator** (`Pool.HTTP3`) -- a `GenStateMachine` per origin (`:idle` /
+   `:connected` states). Routes callers to connection workers with available
+   stream slots, eagerly expanding up to `max_connections`, and queues callers
+   when all slots are saturated.
+
+2. **Connection worker** (`Pool.HTTP3.Connection`) -- a `GenStateMachine` per
+   QUIC connection with `:connecting`, `:connected`, and `:draining` states.
+   Owns the `:quic_h3` connection pid, translates QUIC events into caller
+   replies, handles GOAWAY-driven drain, and emits connection telemetry.
+
+The HTTP/3 handshake is asynchronous: the worker starts in `:connecting`,
+queues any requests forwarded during the handshake, and flushes them on
+transition to `:connected`. It notifies the coordinator via
+`{:connection_ready, pid, peer_max_streams}` so the coordinator only picks
+fully-established connections.
+
+The coordinator uses the same two-phase caller model as HTTP/2: workers reply
+directly to the original caller's `from`. Request body streaming uses linked
+tasks per stream that pump enumerables back to the worker as
+`{:stream_chunk, sid, chunk}` / `{:stream_end, sid}` info messages.
+
 ## Connection Layer
 
 The `Quiver.Conn` behaviour defines the wire protocol interface. Two implementations:
@@ -90,6 +115,22 @@ keep-alive for connection reuse and chunked transfer encoding.
 
 The HTTP/2 connection struct is owned and mutated by the Connection worker process.
 
+### HTTP/3
+
+`Quiver.Conn.HTTP3` wraps the `:quic_h3` library (which itself owns the QUIC
+connection and HTTP/3 framing layer). Unlike `Conn.HTTP2` it is not a
+self-contained codec; framing, HPACK/QPACK, and flow control all live inside
+`:quic_h3`. The Quiver-side module focuses on:
+
+- Building HTTP/3 pseudo-header lists from `(method, path, headers, origin)`
+  tuples (validating forbidden headers and normalising case).
+- Querying peer settings such as `peer_max_streams`.
+- Mapping QUIC and HTTP/3 error codes onto Quiver's structured error types
+  (`H3StreamError`, `H3GoAway`, `QUICTransportError`, `QUICHandshakeFailed`).
+
+HTTP/3 is HTTPS-only (no cleartext fallback); the transport is QUIC over UDP
+and ALPN negotiates the `h3` token directly inside the QUIC handshake.
+
 ## Transport Layer
 
 The `Quiver.Transport` behaviour abstracts socket operations with two implementations:
@@ -100,6 +141,9 @@ The `Quiver.Transport` behaviour abstracts socket operations with two implementa
 Sockets are passive by default. Use `activate/1` to switch to `{:active, :once}` mode
 for receiving server-initiated frames (HTTP/2 PING, GOAWAY).
 
+For HTTP/3, the transport is QUIC over UDP and is owned by `:quic_h3` itself;
+Quiver does not interact with sockets directly for that protocol.
+
 ## Supervision Tree
 
 ```
@@ -109,7 +153,9 @@ Quiver.Supervisor (:rest_for_one)
   |-- DynamicSupervisor (pool processes)
         |-- Pool.HTTP1 (per origin, NimblePool)
         |-- Pool.HTTP2 (per origin, coordinator)
-              |-- Pool.HTTP2.Connection (per connection)
+        |     |-- Pool.HTTP2.Connection (per connection)
+        |-- Pool.HTTP3 (per origin, coordinator)
+              |-- Pool.HTTP3.Connection (per connection)
 ```
 
 The `:rest_for_one` strategy ensures that if the Registry crashes, the

@@ -10,6 +10,7 @@ defmodule Quiver.Pool.Manager do
   alias Quiver.Error.PoolStartFailed
   alias Quiver.Pool.HTTP1
   alias Quiver.Pool.HTTP2
+  alias Quiver.Pool.HTTP3
   alias Quiver.Transport
 
   @type origin :: {:http | :https, String.t(), :inet.port_number()}
@@ -40,6 +41,7 @@ defmodule Quiver.Pool.Manager do
     cond do
       :persistent_term.get({HTTP1, pid}, nil) -> HTTP1.stats(pid)
       :persistent_term.get({HTTP2, pid}, nil) -> HTTP2.stats(pid)
+      :persistent_term.get({HTTP3, pid}, nil) -> HTTP3.stats(pid)
       true -> %{active: 0, idle: 0, queued: 0, connections: 0}
     end
   end
@@ -63,6 +65,7 @@ defmodule Quiver.Pool.Manager do
 
   defp pool_module_for(config, origin) do
     case Keyword.get(config, :protocol, :auto) do
+      :http3 -> HTTP3
       :http2 -> HTTP2
       :http1 -> HTTP1
       :auto -> detect_protocol(config, origin)

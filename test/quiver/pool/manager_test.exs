@@ -79,6 +79,30 @@ defmodule Quiver.Pool.ManagerTest do
   end
 
   describe "protocol routing" do
+    test "routes :http3 protocol to Pool.HTTP3" do
+      {:ok, server} =
+        Quiver.H3TestServer.start(fn h3_conn, sid, _m, _p, _h ->
+          :quic_h3.send_response(h3_conn, sid, 200, [])
+          :quic_h3.send_data(h3_conn, sid, "ok", true)
+        end)
+
+      on_exit(fn -> Quiver.H3TestServer.stop(server.name) end)
+
+      h3_name = :"test_h3_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        {Quiver.Supervisor,
+         name: h3_name,
+         pools: %{
+           :default => [protocol: :http3, verify: :verify_none, cacerts: server.cacerts]
+         }}
+      )
+
+      origin = {:https, "localhost", server.port}
+      assert {:ok, pid} = Manager.get_pool(h3_name, origin)
+      assert :persistent_term.get({Quiver.Pool.HTTP3, pid}, nil) == true
+    end
+
     test "starts HTTP/2 pool when protocol: :http2" do
       {:ok, %{port: port, cacerts: cacerts}} =
         TestServer.start(fn conn -> Plug.Conn.send_resp(conn, 200, "h2") end,

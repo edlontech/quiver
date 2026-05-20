@@ -1,13 +1,13 @@
 # Quiver
 
 A fast, resilient HTTP client for Elixir with built-in connection pooling,
-HTTP/2 multiplexing, and streaming support.
+HTTP/2 multiplexing, HTTP/3 over QUIC, and streaming support.
 
 
 ## Features
 
-- **HTTP/1.1 and HTTP/2** -- automatic protocol handling with TLS+ALPN
-- **Connection pooling** -- NimblePool for HTTP/1, GenStateMachine coordinator for HTTP/2
+- **HTTP/1.1, HTTP/2, and HTTP/3** -- HTTP/1 and HTTP/2 via TLS+ALPN; HTTP/3 over QUIC (opt-in per pool)
+- **Connection pooling** -- NimblePool for HTTP/1, GenStateMachine coordinator for HTTP/2 and HTTP/3
 - **Streaming responses** -- lazy body streams for large payloads and SSE
 - **Origin-based routing** -- exact, wildcard, and default pool rules per origin
 - **Structured errors** -- three error classes (transient, invalid, unrecoverable)
@@ -148,6 +148,7 @@ See `Tesla.Adapter.Quiver` docs for all available options.
 - [Architecture](guides/architecture.md)
 - [Error Handling](guides/error-handling.md)
 - [Telemetry](guides/telemetry.md)
+- [HTTP/3](guides/http3.md)
 
 Full API documentation is available on [HexDocs](https://hexdocs.pm/quiver).
 

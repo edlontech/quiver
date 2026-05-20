@@ -15,6 +15,7 @@ defmodule Quiver.Conn do
   @type response_fragment ::
           {:status, reference(), non_neg_integer()}
           | {:headers, reference(), headers()}
+          | {:trailers, reference(), headers()}
           | {:data, reference(), binary()}
           | {:done, reference()}
           | {:error, reference(), term()}
