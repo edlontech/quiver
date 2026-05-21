@@ -29,3 +29,5 @@ quiver-*.tar
 .envrc
 
 /bench/output/
+
+/certs/

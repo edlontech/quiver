@@ -61,3 +61,55 @@ jobs:
 
       - name: Run Integration Tests
         run: mix test.integration
+
+  smoke:
+    name: HTTP/3 smoke (docker)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        elixir: ["1.19.4"]
+        otp: ["28.3"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - name: Restore deps and _build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-mix-
+
+      - name: Fetch and compile deps
+        run: |
+          mix deps.get
+          mix deps.compile
+
+      - name: Generate certs and fixtures
+        run: ./docker/generate_certs.sh
+
+      - name: Boot docker stack
+        run: docker compose -f docker/docker-compose.yml up -d --wait h3-server
+
+      - name: Run smoke suite
+        env:
+          MIX_ENV: test
+          SMOKE_REQUIRE: "1"
+        run: mix test.smoke
+
+      - name: Dump docker logs on failure
+        if: failure()
+        run: docker compose -f docker/docker-compose.yml logs --no-color
+
+      - name: Tear down docker stack
+        if: always()
+        run: docker compose -f docker/docker-compose.yml down -v

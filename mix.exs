@@ -167,8 +167,12 @@ defmodule Quiver.MixProject do
 
   defp aliases do
     [
-      test: ["test --exclude integration"],
+      test: ["test --exclude integration --exclude smoke"],
       "test.integration": ["test --only integration"],
+      "test.smoke": ["test --only smoke"],
+      "smoke.certs": ["cmd ./docker/generate_certs.sh"],
+      "smoke.up": ["cmd docker compose -f docker/docker-compose.yml up -d --wait h3-server"],
+      "smoke.down": ["cmd docker compose -f docker/docker-compose.yml down"],
       "bench.concurrency": ["run bench/concurrency.exs"],
       "bench.payload": ["run bench/payload.exs"],
       "bench.pool_pressure": ["run bench/pool_pressure.exs"],
@@ -197,7 +201,8 @@ defmodule Quiver.MixProject do
         "coveralls.post": :test,
         "coveralls.github": :test,
         "coveralls.html": :test,
-        "test.integration": :test
+        "test.integration": :test,
+        "test.smoke": :test
       ]
     ]
   end
