@@ -32,7 +32,9 @@ defmodule Quiver.Pool.HTTP3.Connection do
   alias Quiver.Error.H3StreamError
   alias Quiver.Error.QUICHandshakeFailed
   alias Quiver.Error.QUICTransportError
+  alias Quiver.HTTP3.Channel
   alias Quiver.Response
+  alias Quiver.Telemetry
 
   defstruct [
     :h3_conn,
@@ -85,6 +87,10 @@ defmodule Quiver.Pool.HTTP3.Connection do
   """
   @spec max_streams(pid()) :: non_neg_integer()
   def max_streams(pid), do: GenStateMachine.call(pid, :max_streams)
+
+  @doc false
+  @spec get_h3_conn(pid()) :: pid() | nil
+  def get_h3_conn(pid), do: GenStateMachine.call(pid, :get_h3_conn)
 
   @impl true
   def init(opts) do
@@ -166,12 +172,16 @@ defmodule Quiver.Pool.HTTP3.Connection do
     |> maybe_put(:cacerts, Keyword.get(config, :cacerts))
     |> maybe_put(:settings, Keyword.get(config, :h3_settings))
     |> maybe_put(:quic_opts, Keyword.get(config, :quic_opts))
+    |> maybe_put_datagram(Keyword.get(config, :h3_datagram_enabled, true))
   end
 
   defp maybe_put(map, _k, nil), do: map
   defp maybe_put(map, _k, :default), do: map
   defp maybe_put(map, _k, v) when is_map(v) and map_size(v) == 0, do: map
   defp maybe_put(map, k, v), do: Map.put(map, k, v)
+
+  defp maybe_put_datagram(map, true), do: Map.put(map, :h3_datagram_enabled, true)
+  defp maybe_put_datagram(map, _), do: map
 
   # -- :connecting state --
 
@@ -205,11 +215,19 @@ defmodule Quiver.Pool.HTTP3.Connection do
     {:keep_state_and_data, [{:reply, from, 0}]}
   end
 
+  def connecting({:call, from}, :get_h3_conn, %{h3_conn: pid}) do
+    {:keep_state_and_data, [{:reply, from, pid}]}
+  end
+
   def connecting(:info, {:forward_request, _from, _m, _p, _h, _b, _t} = msg, data) do
     {:keep_state, %{data | pending_during_connect: [msg | data.pending_during_connect]}}
   end
 
   def connecting(:info, {:forward_stream, _from, _m, _p, _h, _b, _t} = msg, data) do
+    {:keep_state, %{data | pending_during_connect: [msg | data.pending_during_connect]}}
+  end
+
+  def connecting(:info, {:forward_open_channel, _from, _m, _p, _h, _co} = msg, data) do
     {:keep_state, %{data | pending_during_connect: [msg | data.pending_during_connect]}}
   end
 
@@ -240,12 +258,20 @@ defmodule Quiver.Pool.HTTP3.Connection do
     {:keep_state_and_data, [{:reply, from, n}]}
   end
 
+  def connected({:call, from}, :get_h3_conn, %{h3_conn: pid}) do
+    {:keep_state_and_data, [{:reply, from, pid}]}
+  end
+
   def connected(:info, {:forward_request, from, method, path, headers, body, _timeout}, data) do
     open_buffered_request(data, from, method, path, headers, body)
   end
 
   def connected(:info, {:forward_stream, from, method, path, headers, body, _timeout}, data) do
     open_streaming_request(data, from, method, path, headers, body)
+  end
+
+  def connected(:info, {:forward_open_channel, from, method, path, headers, channel_opts}, data) do
+    open_channel_request(data, from, method, path, headers, channel_opts)
   end
 
   def connected(:info, msg, data), do: dispatch_runtime(:connected, msg, data)
@@ -266,12 +292,21 @@ defmodule Quiver.Pool.HTTP3.Connection do
     {:keep_state_and_data, [{:reply, from, 0}]}
   end
 
+  def draining({:call, from}, :get_h3_conn, %{h3_conn: pid}) do
+    {:keep_state_and_data, [{:reply, from, pid}]}
+  end
+
   def draining(:info, {:forward_request, from, _m, _p, _h, _b, _t}, data) do
     reject_with_goaway(data, from)
     :keep_state_and_data
   end
 
   def draining(:info, {:forward_stream, from, _m, _p, _h, _b, _t}, data) do
+    reject_with_goaway(data, from)
+    :keep_state_and_data
+  end
+
+  def draining(:info, {:forward_open_channel, from, _m, _p, _h, _co}, data) do
     reject_with_goaway(data, from)
     :keep_state_and_data
   end
@@ -348,6 +383,18 @@ defmodule Quiver.Pool.HTTP3.Connection do
     {:stop, :shutdown, data}
   end
 
+  defp dispatch_event(
+         {:quic_h3, h3_conn, {:datagram, sid, payload}},
+         %{h3_conn: h3_conn} = data
+       ) do
+    with {:ok, ref} <- Map.fetch(data.stream_to_ref, sid),
+         {:ok, req} <- Map.fetch(data.requests, ref) do
+      deliver_datagram(req, payload, data)
+    end
+
+    :keep_state_and_data
+  end
+
   defp dispatch_event({:quic_h3, _, _}, _data), do: :keep_state_and_data
 
   defp dispatch_event({:DOWN, mon, :process, _, reason}, %{h3_conn_mon: mon} = data) do
@@ -382,6 +429,20 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
   defp maybe_finalize_draining(_state, result, _prev), do: result
 
+  defp deliver_datagram(
+         %{mode: :datagram_channel, channel_owner: pid, channel_ref: cref, stream_id: sid},
+         payload,
+         data
+       ) do
+    send(pid, {:quiver_h3_channel, cref, {:datagram, payload}})
+    emit_datagram_received(data, sid, byte_size(payload))
+  end
+
+  defp deliver_datagram(%{stream_id: sid}, _payload, data) do
+    emit_datagram_dropped(data, sid, :wrong_mode)
+    :ok
+  end
+
   defp handle_goaway(%{goaway_id: existing} = data, gid) when is_integer(existing) do
     effective_gid = min(existing, gid)
     drained = drain_for_goaway(data, effective_gid)
@@ -408,8 +469,22 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
     Enum.each(to_fail, fn {ref, req} ->
       cancel_idle_timer(req)
-      err = H3GoAway.exception(goaway_id: gid, stream_id: req.stream_id, unprocessed_stream: true)
-      reply_error(req, ref, err)
+
+      case req do
+        %{mode: :datagram_channel, channel_owner: pid, channel_ref: cref} ->
+          send(pid, {:quiver_h3_channel, cref, {:closed, {:goaway, gid}}})
+
+        _ ->
+          err =
+            H3GoAway.exception(
+              goaway_id: gid,
+              stream_id: req.stream_id,
+              unprocessed_stream: true
+            )
+
+          reply_error(req, ref, err)
+      end
+
       Process.demonitor(req.monitor, [:flush])
 
       case Map.get(data.stream_tasks, ref) do
@@ -449,6 +524,57 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
   defp open_streaming_request(data, from, method, path, headers, body) do
     open_request(data, from, method, path, headers, body, :streaming)
+  end
+
+  defp open_channel_request(data, from, method, path, headers, channel_opts) do
+    {caller_pid, _tag} = from
+
+    with {:ok, h3_headers} <-
+           ConnHTTP3.build_headers(method, path, headers, data.origin,
+             protocol: channel_opts[:protocol]
+           ),
+         {:ok, sid} <- :quic_h3.request(data.h3_conn, h3_headers, %{end_stream: false}) do
+      ref = make_ref()
+      mon = Process.monitor(caller_pid)
+
+      channel = %Channel{
+        ref: ref,
+        worker_pid: self(),
+        h3_conn: data.h3_conn,
+        stream_id: sid,
+        origin: data.origin
+      }
+
+      req = %{
+        from: from,
+        caller_pid: caller_pid,
+        monitor: mon,
+        mode: :datagram_channel,
+        stream_id: sid,
+        channel_owner: caller_pid,
+        channel_ref: ref,
+        status: nil,
+        headers: [],
+        open_replied?: false
+      }
+
+      data = %{
+        data
+        | requests: Map.put(data.requests, ref, req),
+          monitors: Map.put(data.monitors, mon, ref),
+          stream_to_ref: Map.put(data.stream_to_ref, sid, ref)
+      }
+
+      GenStateMachine.reply(from, {:ok, channel, ref})
+      data = put_request(data, ref, %{req | open_replied?: true})
+
+      {:keep_state, data}
+    else
+      {:error, reason} ->
+        GenStateMachine.reply(from, {:error, normalize_open_error(reason)})
+        notify_pool(data, :stream_open_failed)
+        :keep_state_and_data
+    end
   end
 
   defp open_request(data, from, method, path, headers, body, mode) do
@@ -587,6 +713,14 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
           GenStateMachine.reply(req.from, {:ok, status, headers, ref, self()})
           {:keep_state, put_request(data, ref, req)}
+
+        :datagram_channel ->
+          send(
+            req.channel_owner,
+            {:quiver_h3_channel, req.channel_ref, {:response, status, headers}}
+          )
+
+          {:keep_state, put_request(data, ref, %{req | status: status, headers: headers})}
       end
     end)
   end
@@ -599,6 +733,10 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
         :streaming ->
           {:keep_state, put_request(data, ref, push_streaming_chunk(data, req, ref, chunk))}
+
+        :datagram_channel ->
+          send(req.channel_owner, {:quiver_h3_channel, req.channel_ref, {:stream_data, chunk}})
+          :keep_state_and_data
       end
     end)
   end
@@ -612,8 +750,19 @@ defmodule Quiver.Pool.HTTP3.Connection do
         :streaming ->
           req = push_streaming_chunk(data, req, ref, chunk)
           finish_streaming(data, ref, sid, req)
+
+        :datagram_channel ->
+          finish_datagram_channel(data, ref, sid, req, chunk)
       end
     end)
+  end
+
+  defp finish_datagram_channel(data, ref, sid, req, chunk) do
+    if chunk != <<>> do
+      send(req.channel_owner, {:quiver_h3_channel, req.channel_ref, {:stream_data, chunk}})
+    end
+
+    close_channel_owner(data, ref, sid, req, :peer)
   end
 
   defp handle_trailers(data, sid, trailers) do
@@ -624,19 +773,36 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
         :streaming ->
           finish_streaming(data, ref, sid, %{req | trailers: trailers})
+
+        :datagram_channel ->
+          send(req.channel_owner, {:quiver_h3_channel, req.channel_ref, {:trailers, trailers}})
+          close_channel_owner(data, ref, sid, req, :peer)
       end
     end)
   end
 
   defp handle_stream_reset(data, sid, code) do
     with_request(data, sid, fn ref, req ->
-      cancel_idle_timer(req)
-      err = H3StreamError.exception(stream_id: sid, code: code)
-      reply_error(req, ref, err)
-      data = cleanup_request(data, ref, sid, req.monitor)
-      notify_pool(data, :stream_done)
-      {:keep_state, data}
+      case req.mode do
+        :datagram_channel ->
+          close_channel_owner(data, ref, sid, req, {:reset, code})
+
+        _ ->
+          cancel_idle_timer(req)
+          err = H3StreamError.exception(stream_id: sid, code: code)
+          reply_error(req, ref, err)
+          data = cleanup_request(data, ref, sid, req.monitor)
+          notify_pool(data, :stream_done)
+          {:keep_state, data}
+      end
     end)
+  end
+
+  defp close_channel_owner(data, ref, sid, req, close_reason) do
+    send(req.channel_owner, {:quiver_h3_channel, req.channel_ref, {:closed, close_reason}})
+    data = cleanup_request(data, ref, sid, req.monitor)
+    notify_pool(data, :stream_done)
+    {:keep_state, data}
   end
 
   defp handle_stream_chunk(data, sid, chunk) do
@@ -757,6 +923,18 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
   defp reply_error(%{mode: :streaming}, _ref, _err), do: :ok
 
+  defp reply_error(%{mode: :datagram_channel, open_replied?: false, from: from}, _ref, err) do
+    GenStateMachine.reply(from, {:error, err})
+  end
+
+  defp reply_error(
+         %{mode: :datagram_channel, channel_owner: pid, channel_ref: cref},
+         _ref,
+         err
+       ) do
+    send(pid, {:quiver_h3_channel, cref, {:closed, {:transport, err}}})
+  end
+
   defp reply_error(%{from: from}, _ref, err) do
     GenStateMachine.reply(from, {:error, err})
   end
@@ -811,6 +989,12 @@ defmodule Quiver.Pool.HTTP3.Connection do
     case Map.fetch(data.requests, ref) do
       {:ok, %{mode: :streaming} = req} ->
         cancel_idle_timer(req)
+        _ = :quic_h3.cancel(data.h3_conn, req.stream_id)
+        data = cleanup_request(data, ref, req.stream_id, req.monitor)
+        notify_pool(data, :stream_done)
+        {:keep_state, data}
+
+      {:ok, %{mode: :datagram_channel} = req} ->
         _ = :quic_h3.cancel(data.h3_conn, req.stream_id)
         data = cleanup_request(data, ref, req.stream_id, req.monitor)
         notify_pool(data, :stream_done)
@@ -883,9 +1067,17 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
   defp fail_pending(data, error) do
     Enum.each(data.pending_during_connect, fn
-      {:forward_request, from, _m, _p, _h, _b, _t} -> GenStateMachine.reply(from, {:error, error})
-      {:forward_stream, from, _m, _p, _h, _b, _t} -> GenStateMachine.reply(from, {:error, error})
-      _ -> :ok
+      {:forward_request, from, _m, _p, _h, _b, _t} ->
+        GenStateMachine.reply(from, {:error, error})
+
+      {:forward_stream, from, _m, _p, _h, _b, _t} ->
+        GenStateMachine.reply(from, {:error, error})
+
+      {:forward_open_channel, from, _m, _p, _h, _co} ->
+        GenStateMachine.reply(from, {:error, error})
+
+      _ ->
+        :ok
     end)
   end
 
@@ -923,6 +1115,22 @@ defmodule Quiver.Pool.HTTP3.Connection do
   defp cancel_idle_timer(%{idle_timer: nil}), do: :ok
   defp cancel_idle_timer(%{idle_timer: timer}), do: Process.cancel_timer(timer)
   defp cancel_idle_timer(_), do: :ok
+
+  defp emit_datagram_received(data, sid, bytes) do
+    :telemetry.execute(
+      Telemetry.connection_http3_datagram_event_prefix() ++ [:received],
+      %{bytes: bytes},
+      %{origin: data.origin, stream_id: sid}
+    )
+  end
+
+  defp emit_datagram_dropped(data, sid, reason) do
+    :telemetry.execute(
+      Telemetry.connection_http3_datagram_event_prefix() ++ [:dropped],
+      %{system_time: System.system_time()},
+      %{origin: data.origin, stream_id: sid, reason: reason}
+    )
+  end
 
   defimpl Inspect do
     import Inspect.Algebra

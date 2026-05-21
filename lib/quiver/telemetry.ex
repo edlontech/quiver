@@ -27,6 +27,16 @@ defmodule Quiver.Telemetry do
   - `[:quiver, :connection, :http3, :stop]` -- measurements: `duration` | metadata: `origin, peer_max_streams`
   - `[:quiver, :connection, :http3, :exception]` -- measurements: `duration` | metadata: `origin, reason, kind`
   - `[:quiver, :connection, :http3, :draining]` -- measurements: `system_time` | metadata: `origin, last_stream_id, error_code`
+
+  ## HTTP/3 Datagrams & Channels
+
+  - `[:quiver, :connection, :http3, :datagram, :sent]` -- measurements: `bytes` | metadata: `origin, stream_id`
+  - `[:quiver, :connection, :http3, :datagram, :received]` -- measurements: `bytes` | metadata: `origin, stream_id`
+  - `[:quiver, :connection, :http3, :datagram, :send_failed]` -- measurements: `system_time` | metadata: `origin, stream_id, reason`
+  - `[:quiver, :connection, :http3, :datagram, :dropped]` -- measurements: `system_time` | metadata: `origin, stream_id, reason`
+  - `[:quiver, :connection, :http3, :channel, :start]` -- measurements: `system_time` | metadata: `origin, method, path`
+  - `[:quiver, :connection, :http3, :channel, :stop]` -- measurements: `duration` | metadata: `origin, close_reason`
+  - `[:quiver, :connection, :http3, :channel, :exception]` -- measurements: `duration` | metadata: `origin, kind, reason`
   """
 
   @doc false
@@ -48,6 +58,14 @@ defmodule Quiver.Telemetry do
   @doc false
   @spec connection_http3_event_prefix() :: [atom()]
   def connection_http3_event_prefix, do: [:quiver, :connection, :http3]
+
+  @doc false
+  @spec connection_http3_datagram_event_prefix() :: [atom()]
+  def connection_http3_datagram_event_prefix, do: [:quiver, :connection, :http3, :datagram]
+
+  @doc false
+  @spec connection_http3_channel_event_prefix() :: [atom()]
+  def connection_http3_channel_event_prefix, do: [:quiver, :connection, :http3, :channel]
 
   @doc false
   @spec span([atom()], map(), (-> {result, map()})) :: result when result: term()

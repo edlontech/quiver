@@ -219,6 +219,32 @@ defmodule Quiver.ConfigTest do
     end
   end
 
+  describe "h3_datagram_enabled validation" do
+    test "accepted with protocol: :http3" do
+      assert {:ok, validated} =
+               Config.validate_pool(protocol: :http3, h3_datagram_enabled: true)
+
+      assert validated[:h3_datagram_enabled] == true
+    end
+
+    test "rejected with protocol: :http2" do
+      assert {:error, %InvalidPoolOpts{} = err} =
+               Config.validate_pool(protocol: :http2, h3_datagram_enabled: true)
+
+      assert Exception.message(err) =~ "h3_datagram_enabled"
+    end
+
+    test "rejected with protocol: :auto when explicitly true" do
+      assert {:error, %InvalidPoolOpts{}} =
+               Config.validate_pool(protocol: :auto, h3_datagram_enabled: true)
+    end
+
+    test "accepted (default) with protocol: :auto when not explicit" do
+      assert {:ok, validated} = Config.validate_pool(protocol: :auto)
+      assert validated[:h3_datagram_enabled] == true
+    end
+  end
+
   describe "parse_rules/1" do
     test "parses exact origin" do
       assert {:ok,

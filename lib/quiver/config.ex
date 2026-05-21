@@ -72,6 +72,13 @@ defmodule Quiver.Config do
               |> Zoi.gte(1)
               |> Zoi.optional()
               |> Zoi.default(100),
+            h3_datagram_enabled:
+              Zoi.boolean(
+                description:
+                  "Advertise SETTINGS_H3_DATAGRAM=1 (RFC 9297). Defaults to true; only meaningful with protocol: :http3."
+              )
+              |> Zoi.optional()
+              |> Zoi.default(true),
             connect_timeout:
               Zoi.integer(description: "TCP/TLS connect timeout in ms.")
               |> Zoi.gte(1)
@@ -137,18 +144,40 @@ defmodule Quiver.Config do
   """
   @spec validate_pool(pool_opts()) :: {:ok, pool_opts()} | {:error, InvalidPoolOpts.t()}
   def validate_pool(opts) do
+    explicit = Keyword.has_key?(opts, :h3_datagram_enabled)
+
     case Zoi.parse(@schema, opts) do
-      {:ok, validated} -> check_h3_constraints(validated)
-      {:error, errors} -> {:error, to_pool_error(errors)}
+      {:ok, validated} ->
+        marked = Keyword.put(validated, :__h3_datagram_explicit__, explicit)
+
+        case check_h3_constraints(marked) do
+          {:ok, ok} -> {:ok, Keyword.delete(ok, :__h3_datagram_explicit__)}
+          {:error, _} = err -> err
+        end
+
+      {:error, errors} ->
+        {:error, to_pool_error(errors)}
     end
   end
 
   defp check_h3_constraints(opts) do
-    if Keyword.get(opts, :protocol) == :http3 and proxy_configured?(opts) do
-      {:error,
-       InvalidPoolOpts.exception(errors: ["proxy is not supported with protocol: :http3 in v1"])}
-    else
-      {:ok, opts}
+    cond do
+      Keyword.get(opts, :protocol) == :http3 and proxy_configured?(opts) ->
+        {:error,
+         InvalidPoolOpts.exception(errors: ["proxy is not supported with protocol: :http3 in v1"])}
+
+      # Implicit dependency: Zoi has already filled the default :h3_datagram_enabled = true,
+      # so this branch fires only when the user explicitly set it AND not on :http3.
+      # If the default ever changes, revisit `__h3_datagram_explicit__` semantics.
+      Keyword.get(opts, :protocol) != :http3 and Keyword.get(opts, :h3_datagram_enabled) == true and
+          Keyword.get(opts, :__h3_datagram_explicit__, false) ->
+        {:error,
+         InvalidPoolOpts.exception(
+           errors: ["h3_datagram_enabled is only valid with protocol: :http3"]
+         )}
+
+      true ->
+        {:ok, opts}
     end
   end
 

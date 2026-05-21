@@ -149,6 +149,39 @@ defmodule Quiver.Pool.HTTP3 do
     :exit, _ -> %{active: 0, idle: 0, queued: 0, connections: 0}
   end
 
+  @doc false
+  @spec first_worker(pid()) :: pid() | nil
+  def first_worker(pool) do
+    GenStateMachine.call(pool, :first_worker)
+  end
+
+  @doc """
+  Opens a datagram channel through this pool. Internal entry point used by
+  `Quiver.HTTP3.open_datagram_channel/4`.
+
+  Forwards `{:forward_open_channel, from, method, path, headers, channel_opts}`
+  to a picked worker, mirroring the `:forward_request` two-phase model. The
+  worker replies directly to `from` with `{:ok, %Channel{}, ref}` or
+  `{:error, term}`.
+  """
+  @spec open_channel(pid(), atom(), String.t(), list(), keyword(), keyword()) ::
+          {:ok, Quiver.HTTP3.Channel.t(), reference()} | {:error, term()}
+  def open_channel(pool, method, path, headers, channel_opts, opts \\ []) do
+    timeout = Keyword.get(opts, :open_timeout, 5_000)
+    do_open_channel(pool, method, path, headers, channel_opts, timeout)
+  end
+
+  defp do_open_channel(pool, method, path, headers, channel_opts, timeout) do
+    GenStateMachine.call(
+      pool,
+      {:open_channel, method, path, headers, channel_opts},
+      timeout
+    )
+  catch
+    :exit, {:timeout, _} ->
+      {:error, CheckoutTimeout.exception(origin: "unknown", timeout: timeout)}
+  end
+
   @impl true
   def init(opts) do
     origin = Keyword.fetch!(opts, :origin)
@@ -200,8 +233,23 @@ defmodule Quiver.Pool.HTTP3 do
     end
   end
 
+  def idle({:call, from}, {:open_channel, method, path, headers, channel_opts}, data) do
+    case start_connection(data) do
+      {:ok, _conn_pid, data} ->
+        data = enqueue_channel(from, method, path, headers, channel_opts, data)
+        {:next_state, :connected, data}
+
+      {:error, reason, data} ->
+        {:keep_state, data, [{:reply, from, {:error, reason}}]}
+    end
+  end
+
   def idle({:call, from}, :stats, data) do
     {:keep_state_and_data, [{:reply, from, read_stats(data)}]}
+  end
+
+  def idle({:call, from}, :first_worker, data) do
+    {:keep_state_and_data, [{:reply, from, lookup_first_worker(data)}]}
   end
 
   def idle(:info, :sweep_queue, data) do
@@ -267,8 +315,28 @@ defmodule Quiver.Pool.HTTP3 do
     end
   end
 
+  def connected({:call, from}, {:open_channel, method, path, headers, channel_opts}, data) do
+    case maybe_expand_and_pick(data) do
+      {:ok, conn_pid, data} ->
+        data = forward_open_channel(conn_pid, from, method, path, headers, channel_opts, data)
+        {:keep_state, data}
+
+      {:pending, data} ->
+        data = enqueue_channel(from, method, path, headers, channel_opts, data)
+        {:keep_state, data}
+
+      :none_available ->
+        data = enqueue_channel(from, method, path, headers, channel_opts, data)
+        {:keep_state, data}
+    end
+  end
+
   def connected({:call, from}, :stats, data) do
     {:keep_state_and_data, [{:reply, from, read_stats(data)}]}
+  end
+
+  def connected({:call, from}, :first_worker, data) do
+    {:keep_state_and_data, [{:reply, from, lookup_first_worker(data)}]}
   end
 
   def connected(:info, {:connection_ready, conn_pid, max}, data) do
@@ -436,6 +504,23 @@ defmodule Quiver.Pool.HTTP3 do
     update_connection_stream_count(data, conn_pid, 1)
   end
 
+  defp forward_open_channel(conn_pid, from, method, path, headers, channel_opts, data) do
+    send(conn_pid, {:forward_open_channel, from, method, path, headers, channel_opts})
+    update_connection_stream_count(data, conn_pid, 1)
+  end
+
+  defp enqueue_channel(from, method, path, headers, channel_opts, data) do
+    timeout = data.checkout_timeout
+    deadline = System.monotonic_time(:millisecond) + timeout
+
+    entry =
+      {:datagram_channel, from, method, path, headers, nil, [channel_opts: channel_opts],
+       deadline}
+
+    schedule_sweep()
+    %{data | waiting: :queue.in(entry, data.waiting)}
+  end
+
   defp enqueue(from, mode, method, path, headers, body, opts, data) do
     timeout = Keyword.get(opts, :checkout_timeout, data.checkout_timeout)
     deadline = System.monotonic_time(:millisecond) + timeout
@@ -486,6 +571,15 @@ defmodule Quiver.Pool.HTTP3 do
          data
        ) do
     forward_stream(conn_pid, from, method, path, headers, body, opts, data)
+  end
+
+  defp dispatch_entry(
+         {:datagram_channel, from, method, path, headers, _body, opts, _deadline},
+         conn_pid,
+         data
+       ) do
+    channel_opts = Keyword.get(opts, :channel_opts, [])
+    forward_open_channel(conn_pid, from, method, path, headers, channel_opts, data)
   end
 
   defp entry_from_and_deadline({_mode, from, _, _, _, _, _, deadline}), do: {from, deadline}
@@ -553,6 +647,12 @@ defmodule Quiver.Pool.HTTP3 do
 
   defp format_origin({scheme, host, port}), do: "#{scheme}://#{host}:#{port}"
   defp format_origin(other), do: inspect(other)
+
+  defp lookup_first_worker(%__MODULE__{connections: conns}) when map_size(conns) == 0, do: nil
+
+  defp lookup_first_worker(%__MODULE__{connections: conns}) do
+    conns |> Map.keys() |> hd()
+  end
 
   defimpl Inspect do
     import Inspect.Algebra

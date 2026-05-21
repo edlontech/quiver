@@ -172,27 +172,40 @@ defmodule Quiver.Conn.HTTP3 do
 
   The origin is a `{scheme, host, port}` tuple. Authority omits the
   default port for the scheme (`443` for `:https`, `80` for `:http`).
+
+  Pseudo-header order: `:method, :protocol?, :scheme, :path, :authority`.
+  The `:protocol` pseudo-header (RFC 8441 / 9220) is emitted only when a
+  non-nil `:protocol` opt is provided — typically with `method == :connect`
+  for extended CONNECT (WebTransport, Connect-UDP, MASQUE).
   """
   @spec build_headers(
           atom(),
           String.t(),
           Quiver.Conn.headers(),
-          {atom(), String.t(), :inet.port_number()}
+          {atom(), String.t(), :inet.port_number()},
+          keyword()
         ) ::
           {:ok, [{binary(), binary()}]} | {:error, term()}
-  def build_headers(method, path, headers, {scheme, host, port}) do
-    pseudo = [
-      {<<":method">>, method |> Atom.to_string() |> String.upcase()},
-      {<<":scheme">>, Atom.to_string(scheme)},
-      {<<":path">>, path},
-      {<<":authority">>, authority(host, port, scheme)}
-    ]
+  def build_headers(method, path, headers, {scheme, host, port}, opts \\ []) do
+    pseudo =
+      [
+        {<<":method">>, method |> Atom.to_string() |> String.upcase()}
+      ] ++
+        protocol_pseudo(opts[:protocol]) ++
+        [
+          {<<":scheme">>, Atom.to_string(scheme)},
+          {<<":path">>, path},
+          {<<":authority">>, authority(host, port, scheme)}
+        ]
 
     case validate_user_headers(headers) do
       {:ok, user} -> {:ok, pseudo ++ user}
       {:error, _} = err -> err
     end
   end
+
+  defp protocol_pseudo(nil), do: []
+  defp protocol_pseudo(proto) when is_binary(proto), do: [{<<":protocol">>, proto}]
 
   @doc """
   Backwards-compatible wrapper around `build_headers/4` for a
@@ -233,12 +246,16 @@ defmodule Quiver.Conn.HTTP3 do
     |> maybe_put(:cacerts, Keyword.get(opts, :cacerts))
     |> maybe_put(:settings, Keyword.get(opts, :h3_settings))
     |> maybe_put(:quic_opts, Keyword.get(opts, :quic_opts))
+    |> maybe_put_datagram(Keyword.get(opts, :h3_datagram_enabled, true))
   end
 
   defp maybe_put(map, _k, nil), do: map
   defp maybe_put(map, _k, :default), do: map
   defp maybe_put(map, _k, v) when is_map(v) and map_size(v) == 0, do: map
   defp maybe_put(map, k, v), do: Map.put(map, k, v)
+
+  defp maybe_put_datagram(map, true), do: Map.put(map, :h3_datagram_enabled, true)
+  defp maybe_put_datagram(map, _), do: map
 
   defp validate_user_headers(headers) do
     Enum.reduce_while(headers, {:ok, []}, fn {k, v}, {:ok, acc} ->

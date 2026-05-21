@@ -125,6 +125,97 @@ enumerable element as a DATA frame, and finally sends an empty DATA with
 `END_STREAM` set. If the producer raises or the caller dies mid-stream,
 Quiver cancels the QUIC stream with the appropriate H3 error code.
 
+## Datagrams
+
+Quiver supports HTTP/3 datagrams as a callback-driven channel API. The
+extension is negotiated automatically on every `protocol: :http3` pool.
+
+```elixir
+{:ok, final_acc} =
+  Quiver.HTTP3.open_datagram_channel(
+    "https://h3.example/wt/session",
+    [method: :connect, protocol: "webtransport"],
+    fn
+      {:response, 200, _hs}, channel, acc ->
+        Quiver.HTTP3.send_datagram(channel, "hello")
+        {:cont, acc}
+
+      {:datagram, payload}, _ch, acc ->
+        IO.inspect(payload, label: "got")
+        {:cont, [payload | acc]}
+
+      {:closed, _reason}, _ch, acc ->
+        {:halt, Enum.reverse(acc)}
+    end,
+    []
+  )
+```
+
+The handler is invoked synchronously by `open_datagram_channel/4` for
+every event in arrival order:
+
+- `{:response, status, headers}` -- usually the first event, but RFC 9297
+  permits a `:datagram` to arrive first. Tolerate `channel.status == nil`
+  in your datagram clause.
+- `{:datagram, payload}` -- inbound datagrams. Best-effort, unreliable,
+  unordered (RFC 9221). Drop quietly if your application can't keep up.
+- `{:stream_data, bytes}` -- DATA frames on the underlying H/3 stream.
+  Most useful for protocols that mix bytes and datagrams.
+- `{:trailers, headers}` -- HTTP/3 trailers; terminal.
+- `{:closed, reason}` -- channel closed; terminal. Reason is `:peer`,
+  `{:reset, code}`, `{:goaway, gid}`, or `{:transport, exception}`.
+
+Use `:method, :connect` and a `:protocol` opt to open an extended-CONNECT
+session, required for WebTransport, RFC 9298
+Connect-UDP, and MASQUE. With `:method, :get` and a server that closes
+the stream after `200 OK`, the channel will receive `:response` and then
+`:closed, :peer` immediately, with no useful window to send datagrams.
+
+### Send / query helpers
+
+```elixir
+Quiver.HTTP3.send_datagram(channel, iodata)       # :ok | {:error, _}
+Quiver.HTTP3.max_datagram_size(channel)           # usable payload size
+Quiver.HTTP3.h3_datagrams_enabled?(channel)       # peer negotiation status
+```
+
+### Options
+
+| Option | Default | Meaning |
+|---|---|---|
+| `:method` | `:get` | HTTP method (`:connect` for extended CONNECT). |
+| `:protocol` | `nil` | `:protocol` pseudo-header value (e.g. `"webtransport"`). |
+| `:headers` | `[]` | Extra user headers. |
+| `:name` | `Quiver.Pool` | Supervisor instance. |
+| `:receive_timeout` | `15_000` | Per-event ms deadline. |
+| `:open_timeout` | `5_000` | Initial open-call ms deadline. |
+| `:require_datagrams` | `true` | Fail fast if the peer didn't negotiate. |
+
+### Errors
+
+- `Quiver.Error.H3DatagramsDisabled` (`:transient`) -- peer didn't negotiate.
+- `Quiver.Error.H3DatagramError` -- wraps RFC 9221 transport errors. Class
+  is `:transient` except for `:too_large` (which is `:invalid` because the
+  caller must shrink the payload to fit `max_datagram_size/1`).
+
+### Telemetry
+
+In addition to the connection-level events listed below, the datagram
+channel emits events nested under `[:quiver, :connection, :http3, ...]`:
+
+| Event | Measurements | Metadata |
+|---|---|---|
+| `[:quiver, :connection, :http3, :datagram, :sent]` | `bytes` | `origin, stream_id` |
+| `[:quiver, :connection, :http3, :datagram, :received]` | `bytes` | `origin, stream_id` |
+| `[:quiver, :connection, :http3, :datagram, :send_failed]` | `system_time` | `origin, stream_id, reason` |
+| `[:quiver, :connection, :http3, :datagram, :dropped]` | `system_time` | `origin, stream_id, reason` |
+| `[:quiver, :connection, :http3, :channel, :start]` | `system_time` | `origin, method, path` |
+| `[:quiver, :connection, :http3, :channel, :stop]` | `duration` | `origin, close_reason` |
+| `[:quiver, :connection, :http3, :channel, :exception]` | `duration` | `origin, kind, reason` |
+
+The full list and current measurement/metadata shape is documented in
+`Quiver.Telemetry`.
+
 ## Telemetry
 
 In addition to the protocol-agnostic `[:quiver, :request, ...]` span and
@@ -146,36 +237,17 @@ subsequent GOAWAY frames that only tighten the drain are not re-emitted.
 The in-flight stream count keeps dropping until the connection terminates
 with `:normal`.
 
-You can subscribe with `:telemetry.attach_many/4`:
-
-```elixir
-:telemetry.attach_many(
-  "myapp-quiver-h3",
-  [
-    [:quiver, :connection, :http3, :start],
-    [:quiver, :connection, :http3, :stop],
-    [:quiver, :connection, :http3, :exception],
-    [:quiver, :connection, :http3, :draining]
-  ],
-  fn event, measurements, metadata, _ ->
-    Logger.info("h3 event=#{inspect(event)} meta=#{inspect(metadata)} meas=#{inspect(measurements)}")
-  end,
-  nil
-)
-```
-
 The prefix is exposed for convenience as
 `Quiver.Telemetry.connection_http3_event_prefix/0`.
 
-## Limitations
+## TODOs
 
 - **No 0-RTT.** All handshakes are full 1-RTT. Session tickets emitted by the
   server are silently dropped because `:quic_h3` does not forward the
   `{session_ticket, _}` event to its owner, and the H3 state machine rejects
   requests pre-`connected` so the underlying QUIC's 0-RTT machinery cannot
   be reached. We need to patch the upstream before implementing this.
-- **No HTTP/3 datagrams (RFC 9297).** `:quic_h3` exports the wire-level API
-  (`send_datagram/3`, `h3_datagrams_enabled/1`, `max_datagram_size/2`).
+- **No WebTransport / Connect-UDP / MASQUE.**
 - **No proxy support.** CONNECT tunnelling is not implemented for HTTP/3.
   Combining `protocol: :http3` with a `proxy:` option fails validation.
   HTTP/1.1 and HTTP/2 already support CONNECT proxies; HTTP/3 would need

@@ -80,6 +80,38 @@ defmodule Quiver.Conn.HTTP3Test do
     end
   end
 
+  describe "build_headers/5 with :protocol opt" do
+    test "emits :protocol pseudo-header between :method and :scheme" do
+      {:ok, headers} =
+        HTTP3.build_headers(:connect, "/wt", [], {:https, "example.test", 443},
+          protocol: "webtransport"
+        )
+
+      assert [
+               {":method", "CONNECT"},
+               {":protocol", "webtransport"},
+               {":scheme", "https"},
+               {":path", "/wt"},
+               {":authority", "example.test"}
+             ] = headers
+    end
+
+    test "omits :protocol when nil" do
+      {:ok, headers} = HTTP3.build_headers(:get, "/", [], {:https, "x.test", 443})
+
+      refute Enum.any?(headers, fn {k, _} -> k == ":protocol" end)
+    end
+
+    test "build_headers/4 and build_headers/5 with nil :protocol produce identical output" do
+      {:ok, h4} = HTTP3.build_headers(:get, "/", [{"x-foo", "bar"}], {:https, "x.test", 443})
+
+      {:ok, h5} =
+        HTTP3.build_headers(:get, "/", [{"x-foo", "bar"}], {:https, "x.test", 443}, protocol: nil)
+
+      assert h4 == h5
+    end
+  end
+
   describe "open?/1" do
     test "false for nil pid" do
       conn = %HTTP3{
