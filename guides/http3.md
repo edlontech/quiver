@@ -167,26 +167,28 @@ You can subscribe with `:telemetry.attach_many/4`:
 The prefix is exposed for convenience as
 `Quiver.Telemetry.connection_http3_event_prefix/0`.
 
-## Known limitations (v1)
+## Limitations
 
-- **No Alt-Svc / HTTPS-record discovery.** HTTP/3 is opt-in per pool. Quiver
-  will not transparently upgrade an HTTPS pool to HTTP/3.
+- **No 0-RTT.** All handshakes are full 1-RTT. Session tickets emitted by the
+  server are silently dropped because `:quic_h3` does not forward the
+  `{session_ticket, _}` event to its owner, and the H3 state machine rejects
+  requests pre-`connected` so the underlying QUIC's 0-RTT machinery cannot
+  be reached. We need to patch the upstream before implementing this.
+- **No HTTP/3 datagrams (RFC 9297).** `:quic_h3` exports the wire-level API
+  (`send_datagram/3`, `h3_datagrams_enabled/1`, `max_datagram_size/2`).
 - **No proxy support.** CONNECT tunnelling is not implemented for HTTP/3.
   Combining `protocol: :http3` with a `proxy:` option fails validation.
-- **No connection migration API.** Path migration when the local address
-  changes (e.g. switching networks) is not exposed. `:quic_h3` may already
-  support it on the wire; the Quiver-level API does not.
-- **No HTTP/3 datagrams support.** Quiver does not opt in to RFC 9297
-  datagrams at the QUIC layer, so inbound datagrams are never delivered to
-  the worker and there is no public send API. Datagram support is tracked
-  as a future feature.
+  HTTP/1.1 and HTTP/2 already support CONNECT proxies; HTTP/3 would need
+  either CONNECT-UDP (RFC 9298) or MASQUE (RFC 9484), both of which are
+  separate projects on top of the datagrams work.
 - **No server push.** HTTP/3 server push is not implemented; pushed streams
-  from the peer are ignored.
-- **No 0-RTT.** All handshakes are full 1-RTT in v1.
-
-These are tracked separately and may land in future releases. None of them
-preclude future support; the worker exposes hook points (telemetry, error
-types, message dispatch) deliberately to make the additions cheap.
+  from the peer are ignored. `:quic_h3` exports the necessary
+  (`set_max_push_id/2`, push event handling), but server push is almost
+  not used, so i'll only add it if there's demand.
+- **No Alt-Svc / HTTPS-record discovery.** HTTP/3 is opt-in per pool. Quiver
+  will not transparently upgrade an HTTPS pool to HTTP/3.
+- **No connection migration API.** Path migration when the local address
+  changes (e.g. switching networks) is not exposed.
 
 ## Benchmarking
 
