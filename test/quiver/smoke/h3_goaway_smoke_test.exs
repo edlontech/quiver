@@ -1,7 +1,6 @@
 defmodule Quiver.Smoke.H3GoawaySmokeTest do
   use Quiver.SmokeCase, async: false
 
-  alias Quiver.Error.CheckoutTimeout
   alias Quiver.Error.H3GoAway
   alias Quiver.Response
 
@@ -27,7 +26,6 @@ defmodule Quiver.Smoke.H3GoawaySmokeTest do
     case res1 do
       {:ok, %Response{status: 200}} -> :ok
       {:error, %H3GoAway{}} -> :ok
-      {:error, %CheckoutTimeout{}} -> :ok
       other -> flunk("unexpected /goaway result: #{inspect(other)}")
     end
 

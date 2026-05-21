@@ -148,6 +148,89 @@ defmodule Quiver.Pool.HTTP3ResilienceTest do
       end
     end
 
+    test "GOAWAY that drains the last in-flight request still routes through :draining and notifies the pool" do
+      slow_handler = fn _h3_conn, _sid, _method, _path, _headers ->
+        Process.sleep(5_000)
+      end
+
+      {:ok, slow_server} = H3TestServer.start(slow_handler)
+      on_exit(fn -> H3TestServer.stop(slow_server.name) end)
+
+      slow_config = [verify: :verify_none, cacerts: slow_server.cacerts]
+
+      attach_h3_telemetry([[:quiver, :connection, :http3, :draining]])
+
+      {:ok, pool} =
+        HTTP3.start_link(
+          origin: {:https, "localhost", slow_server.port},
+          pool_opts: slow_config
+        )
+
+      caller =
+        Task.async(fn ->
+          HTTP3.request(pool, :get, "/", [], nil, receive_timeout: 5_000)
+        end)
+
+      wait_for_inflight_request(pool)
+
+      [{conn_pid, _info} | _] = pool_connections(pool)
+      conn_mon = Process.monitor(conn_pid)
+      %{h3_conn: h3_conn} = :sys.get_state(conn_pid) |> elem(1)
+
+      send(conn_pid, {:quic_h3, h3_conn, {:goaway, 0}})
+
+      assert {:error, %H3GoAway{unprocessed_stream: true}} = Task.await(caller, 2_000)
+
+      assert_receive {:tel, [:quiver, :connection, :http3, :draining], _, %{last_stream_id: 0}},
+                     1_000
+
+      assert_receive {:DOWN, ^conn_mon, :process, ^conn_pid, :normal}, 1_000
+
+      [{_pid, %{state: pool_state}}] =
+        case pool_connections(pool) do
+          [] -> [{nil, %{state: :removed}}]
+          conns -> conns
+        end
+
+      assert pool_state in [:draining, :removed]
+    end
+
+    test "forward_request arriving after GOAWAY-drained-everything is rejected, not lost" do
+      slow_handler = fn _h3_conn, _sid, _method, _path, _headers ->
+        Process.sleep(5_000)
+      end
+
+      {:ok, slow_server} = H3TestServer.start(slow_handler)
+      on_exit(fn -> H3TestServer.stop(slow_server.name) end)
+
+      slow_config = [verify: :verify_none, cacerts: slow_server.cacerts]
+
+      {:ok, pool} =
+        HTTP3.start_link(
+          origin: {:https, "localhost", slow_server.port},
+          pool_opts: slow_config
+        )
+
+      caller =
+        Task.async(fn ->
+          HTTP3.request(pool, :get, "/", [], nil, receive_timeout: 5_000)
+        end)
+
+      wait_for_inflight_request(pool)
+
+      [{conn_pid, _info} | _] = pool_connections(pool)
+      %{h3_conn: h3_conn} = :sys.get_state(conn_pid) |> elem(1)
+
+      send(conn_pid, {:quic_h3, h3_conn, {:goaway, 0}})
+
+      assert {:error, %H3GoAway{}} = Task.await(caller, 2_000)
+
+      reply_ref = make_ref()
+      send(conn_pid, {:forward_request, {self(), reply_ref}, :get, "/", [], nil, 5_000})
+
+      assert_receive {^reply_ref, {:error, %H3GoAway{}}}, 1_000
+    end
+
     test "draining worker with in-flight request rejects new forwards with H3GoAway" do
       slow_handler = fn h3_conn, sid, _method, _path, _headers ->
         Process.sleep(500)

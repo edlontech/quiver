@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Dict, Optional, Tuple, List
 
 from aioquic.asyncio import QuicConnectionProtocol, serve
-from aioquic.h3.connection import H3_ALPN, H3Connection
+from aioquic.buffer import encode_uint_var
+from aioquic.h3.connection import H3_ALPN, FrameType, H3Connection, encode_frame
 from aioquic.h3.events import (
     HeadersReceived,
     DataReceived,
@@ -192,8 +193,7 @@ class HttpServerProtocol(QuicConnectionProtocol):
             self._send_with_trailers(stream_id, request)
             return
         elif path == "/goaway":
-            # Test GOAWAY
-            self._http.send_goaway(0)
+            self._send_goaway_frame(stream_id)
             self.transmit()
             body = b"GOAWAY sent"
             status = 200
@@ -256,6 +256,24 @@ class HttpServerProtocol(QuicConnectionProtocol):
                 return b"Internal Server Error", 500, b"text/plain"
         else:
             return b"Not Found", 404, b"text/plain"
+
+    def _send_goaway_frame(self, last_stream_id: int) -> None:
+        """Send an HTTP/3 GOAWAY frame on the local control stream.
+
+        aioquic 1.x does not expose a public send_goaway helper, so we
+        encode the frame ourselves and write it directly to the control
+        stream via the underlying QUIC connection.
+        """
+        if self._http is None or self._http._local_control_stream_id is None:
+            logger.warning("GOAWAY requested but control stream is not open")
+            return
+
+        payload = encode_uint_var(last_stream_id)
+        frame = encode_frame(FrameType.GOAWAY, payload)
+        self._http._quic.send_stream_data(
+            self._http._local_control_stream_id, frame, end_stream=False
+        )
+        logger.info(f"sent GOAWAY frame, last_stream_id={last_stream_id}")
 
     def _send_simple_response(
         self,

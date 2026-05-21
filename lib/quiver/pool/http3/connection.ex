@@ -278,13 +278,18 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
   # -- :draining state --
 
+  @drain_grace_ms 100
+
   def draining(:enter, _old, data) do
     if data.pool_pid, do: send(data.pool_pid, {:connection_draining, self()})
+    {:keep_state_and_data, [{:state_timeout, @drain_grace_ms, :drain_idle}]}
+  end
 
+  def draining(:state_timeout, :drain_idle, data) do
     if map_size(data.requests) == 0 do
       {:stop, :normal, data}
     else
-      :keep_state_and_data
+      {:keep_state_and_data, [{:state_timeout, @drain_grace_ms, :drain_idle}]}
     end
   end
 
@@ -446,21 +451,13 @@ defmodule Quiver.Pool.HTTP3.Connection do
   defp handle_goaway(%{goaway_id: existing} = data, gid) when is_integer(existing) do
     effective_gid = min(existing, gid)
     drained = drain_for_goaway(data, effective_gid)
-    maybe_drain_transition(drained)
+    {:next_state, :draining, drained}
   end
 
   defp handle_goaway(data, gid) do
     data = drain_for_goaway(data, gid)
     emit_draining(data, gid)
-    maybe_drain_transition(data)
-  end
-
-  defp maybe_drain_transition(data) do
-    if map_size(data.requests) == 0 do
-      {:stop, :normal, data}
-    else
-      {:next_state, :draining, data}
-    end
+    {:next_state, :draining, data}
   end
 
   defp drain_for_goaway(data, gid) do

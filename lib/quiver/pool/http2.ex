@@ -18,6 +18,7 @@ defmodule Quiver.Pool.HTTP2 do
   alias Quiver.Error.CheckoutTimeout
   alias Quiver.Error.StreamError
   alias Quiver.Pool.HTTP2.Connection
+  alias Quiver.Pool.Registration
   alias Quiver.StreamResponse
 
   @behaviour Quiver.Pool
@@ -54,9 +55,7 @@ defmodule Quiver.Pool.HTTP2 do
   @doc "Starts the HTTP/2 pool coordinator."
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
-    {name, opts} = Keyword.pop(opts, :name)
-    args = if name, do: [name: name], else: []
-    GenStateMachine.start_link(__MODULE__, opts, args)
+    GenStateMachine.start_link(__MODULE__, opts, [])
   end
 
   @impl Quiver.Pool
@@ -144,17 +143,25 @@ defmodule Quiver.Pool.HTTP2 do
   def init(opts) do
     origin = Keyword.fetch!(opts, :origin)
     config = Keyword.get(opts, :pool_opts, [])
+    name = Keyword.get(opts, :name)
 
     :persistent_term.put({__MODULE__, self()}, true)
 
-    data = %__MODULE__{
-      origin: origin,
-      config: config,
-      max_connections: Keyword.get(config, :max_connections, 1),
-      checkout_timeout: Keyword.get(config, :checkout_timeout, 5_000)
-    }
+    case Registration.register(self(), name) do
+      :ok ->
+        data = %__MODULE__{
+          origin: origin,
+          config: config,
+          max_connections: Keyword.get(config, :max_connections, 1),
+          checkout_timeout: Keyword.get(config, :checkout_timeout, 5_000)
+        }
 
-    {:ok, :idle, data}
+        {:ok, :idle, data}
+
+      {:error, {:already_started, _existing}} = err ->
+        :persistent_term.erase({__MODULE__, self()})
+        {:stop, elem(err, 1)}
+    end
   end
 
   @impl true

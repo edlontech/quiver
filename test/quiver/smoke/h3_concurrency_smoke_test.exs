@@ -30,12 +30,6 @@ defmodule Quiver.Smoke.H3ConcurrencySmokeTest do
   end
 
   test "50 concurrent GETs all succeed", %{name: name} do
-    {:ok, %Quiver.Response{status: 200}} =
-      Quiver.new(:get, h3_url("/test.txt"))
-      |> Quiver.request(name: name, receive_timeout: 30_000)
-
-    flush_mailbox(:req_stop)
-
     results =
       1..50
       |> Task.async_stream(
@@ -60,14 +54,6 @@ defmodule Quiver.Smoke.H3ConcurrencySmokeTest do
     assert stats.connections >= 1
 
     assert_n_messages(:req_stop, 50, 5_000)
-  end
-
-  defp flush_mailbox(msg) do
-    receive do
-      ^msg -> flush_mailbox(msg)
-    after
-      0 -> :ok
-    end
   end
 
   defp assert_n_messages(_msg, 0, _timeout), do: :ok
