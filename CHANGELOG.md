@@ -6,6 +6,20 @@
 
 * HTTP/3 support over QUIC via `:quic_h3`. New `protocol: :http3` pool option with `quic_opts` and `h3_settings` knobs. Includes coordinator + per-connection workers, buffered and streaming requests/responses, request body streaming, GOAWAY-driven drain, and connection-level telemetry under `[:quiver, :connection, :http3, ...]`. See `guides/http3.md` for usage, configuration, and known limitations.
 
+## [0.3.0](https://github.com/edlontech/quiver/compare/v0.2.1...v0.3.0) (2026-05-21)
+
+
+### Features
+
+* Derive the Inspect protocol for structs ([fa0b35d](https://github.com/edlontech/quiver/commit/fa0b35d4a0bdb78e71bea6e15621da6016b243ab))
+* **http3:** add RFC 9297 datagram channel support ([1cb8eac](https://github.com/edlontech/quiver/commit/1cb8eac5873a4ed7c74afdb29bcc74306a2e6c8e))
+* initial support for HTTP/3 ([7067fe5](https://github.com/edlontech/quiver/commit/7067fe522e1f9366dd9f626c0a3cc7d164655ec2))
+
+
+### Bug Fixes
+
+* **http3:** Fixed GOAWAY race-condition ([e669f2f](https://github.com/edlontech/quiver/commit/e669f2fd2d5e6e7123d5f0115659ed2cb86bed3a))
+
 ## [0.2.1](https://github.com/edlontech/quiver/compare/v0.2.0...v0.2.1) (2026-04-20)
 
 
