@@ -27,10 +27,14 @@ defmodule Quiver.Pool.HTTP3 do
   alias Quiver.Error.CheckoutTimeout
   alias Quiver.Error.StreamError
   alias Quiver.Pool.HTTP3.Connection
+  alias Quiver.Pool.HTTP3.EarlyData
+  alias Quiver.Pool.HTTP3.SessionTicket
   alias Quiver.Pool.Registration
   alias Quiver.StreamResponse
 
   @behaviour Quiver.Pool
+
+  @max_tickets 5
 
   defstruct [
     :origin,
@@ -38,7 +42,9 @@ defmodule Quiver.Pool.HTTP3 do
     connections: %{},
     waiting: :queue.new(),
     max_connections: 1,
-    checkout_timeout: 5_000
+    checkout_timeout: 5_000,
+    tickets: [],
+    early_connecting: nil
   ]
 
   @type t :: %__MODULE__{
@@ -47,7 +53,9 @@ defmodule Quiver.Pool.HTTP3 do
           connections: map(),
           waiting: :queue.queue(),
           max_connections: pos_integer(),
-          checkout_timeout: pos_integer()
+          checkout_timeout: pos_integer(),
+          tickets: [{term(), integer()}],
+          early_connecting: pid() | nil
         }
 
   @doc false
@@ -221,7 +229,7 @@ defmodule Quiver.Pool.HTTP3 do
   def idle({:call, from}, {:request, method, path, headers, body, opts}, data) do
     case start_connection(data) do
       {:ok, _conn_pid, data} ->
-        data = enqueue(from, :buffered, method, path, headers, body, opts, data)
+        data = route_first_request(from, method, path, headers, body, opts, data)
         {:next_state, :connected, data}
 
       {:error, reason, data} ->
@@ -263,8 +271,13 @@ defmodule Quiver.Pool.HTTP3 do
     {:keep_state, sweep_expired(data)}
   end
 
+  def idle(:info, {:session_ticket, _origin, ticket}, data) do
+    {:keep_state, cache_ticket(data, ticket)}
+  end
+
   def idle(:info, {:connection_ready, conn_pid, max}, data) do
     data = mark_connected(data, conn_pid, max)
+    data = clear_early_connecting(data, conn_pid)
     data = dispatch_all_ready(data)
     {:keep_state, data}
   end
@@ -283,6 +296,7 @@ defmodule Quiver.Pool.HTTP3 do
 
   def idle(:info, {:DOWN, _ref, :process, conn_pid, _reason}, data) do
     connections = Map.delete(data.connections, conn_pid)
+    data = clear_early_connecting(data, conn_pid)
     {:keep_state, %{data | connections: connections}}
   end
 
@@ -291,18 +305,22 @@ defmodule Quiver.Pool.HTTP3 do
   def connected(:enter, _old, _data), do: :keep_state_and_data
 
   def connected({:call, from}, {:request, method, path, headers, body, opts}, data) do
-    case maybe_expand_and_pick(data) do
-      {:ok, conn_pid, data} ->
-        data = forward_request(conn_pid, from, method, path, headers, body, opts, data)
-        {:keep_state, data}
+    if data.early_connecting && EarlyData.eligible?(method, opts, data.config) do
+      data =
+        forward_early_request(
+          data.early_connecting,
+          from,
+          method,
+          path,
+          headers,
+          body,
+          opts,
+          data
+        )
 
-      {:pending, data} ->
-        data = enqueue(from, :buffered, method, path, headers, body, opts, data)
-        {:keep_state, data}
-
-      :none_available ->
-        data = enqueue(from, :buffered, method, path, headers, body, opts, data)
-        {:keep_state, data}
+      {:keep_state, data}
+    else
+      route_request_normally(from, method, path, headers, body, opts, data)
     end
   end
 
@@ -348,6 +366,7 @@ defmodule Quiver.Pool.HTTP3 do
 
   def connected(:info, {:connection_ready, conn_pid, max}, data) do
     data = mark_connected(data, conn_pid, max)
+    data = clear_early_connecting(data, conn_pid)
     data = dispatch_all_ready(data)
     {:keep_state, data}
   end
@@ -368,12 +387,17 @@ defmodule Quiver.Pool.HTTP3 do
     {:keep_state, sweep_expired(data)}
   end
 
+  def connected(:info, {:session_ticket, _origin, ticket}, data) do
+    {:keep_state, cache_ticket(data, ticket)}
+  end
+
   def connected(:info, {:connection_draining, conn_pid}, data) do
     {:keep_state, mark_draining(data, conn_pid)}
   end
 
   def connected(:info, {:DOWN, _ref, :process, conn_pid, _reason}, data) do
     connections = Map.delete(data.connections, conn_pid)
+    data = clear_early_connecting(data, conn_pid)
     data = %{data | connections: connections}
 
     if map_size(connections) == 0 do
@@ -385,20 +409,60 @@ defmodule Quiver.Pool.HTTP3 do
 
   # -- helpers --
 
+  defp cache_ticket(data, ticket) do
+    now = System.system_time(:second)
+    tickets = Enum.take([{ticket, now} | data.tickets], @max_tickets)
+    %{data | tickets: tickets}
+  end
+
+  defp pop_ticket(%{tickets: tickets} = data) do
+    now = System.system_time(:second)
+
+    case Enum.split_while(tickets, fn {ticket, recv} -> expired?(ticket, recv, now) end) do
+      {_expired, [{ticket, _recv} | rest]} -> {ticket, %{data | tickets: rest}}
+      {_all_expired, []} -> {nil, %{data | tickets: []}}
+    end
+  end
+
+  defp expired?(ticket, received_at, now) do
+    case SessionTicket.lifetime(ticket) do
+      nil -> false
+      lifetime -> now - received_at >= lifetime
+    end
+  end
+
   defp start_connection(data) do
-    opts = [origin: data.origin, config: data.config, pool_pid: self()]
+    {ticket, data} = maybe_pop_ticket(data)
+
+    opts =
+      [origin: data.origin, config: data.config, pool_pid: self()]
+      |> maybe_put_session_ticket(ticket)
 
     case Connection.start_link(opts) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
         conn_info = %{ref: ref, stream_count: 0, max_streams: 0, state: :connecting}
         connections = Map.put(data.connections, pid, conn_info)
-        {:ok, pid, %{data | connections: connections}}
+        data = %{data | connections: connections}
+        data = if ticket, do: %{data | early_connecting: pid}, else: data
+        {:ok, pid, data}
 
       {:error, reason} ->
         {:error, reason, data}
     end
   end
+
+  defp maybe_pop_ticket(data) do
+    if EarlyData.enabled?(data.config), do: pop_ticket(data), else: {nil, data}
+  end
+
+  defp maybe_put_session_ticket(opts, nil), do: opts
+  defp maybe_put_session_ticket(opts, ticket), do: Keyword.put(opts, :session_ticket, ticket)
+
+  defp clear_early_connecting(%{early_connecting: pid} = data, pid),
+    do: %{data | early_connecting: nil}
+
+  defp clear_early_connecting(data, _pid), do: data
 
   defp maybe_expand_and_pick(data) do
     if map_size(data.connections) < data.max_connections do
@@ -502,6 +566,34 @@ defmodule Quiver.Pool.HTTP3 do
   defp forward_request(conn_pid, from, method, path, headers, body, opts, data) do
     timeout = Keyword.get(opts, :receive_timeout, 15_000)
     send(conn_pid, {:forward_request, from, method, path, headers, body, timeout})
+    update_connection_stream_count(data, conn_pid, 1)
+  end
+
+  defp route_first_request(from, method, path, headers, body, opts, data) do
+    if data.early_connecting && EarlyData.eligible?(method, opts, data.config) do
+      forward_early_request(data.early_connecting, from, method, path, headers, body, opts, data)
+    else
+      enqueue(from, :buffered, method, path, headers, body, opts, data)
+    end
+  end
+
+  defp route_request_normally(from, method, path, headers, body, opts, data) do
+    case maybe_expand_and_pick(data) do
+      {:ok, conn_pid, data} ->
+        data = forward_request(conn_pid, from, method, path, headers, body, opts, data)
+        {:keep_state, data}
+
+      {:pending, data} ->
+        {:keep_state, enqueue(from, :buffered, method, path, headers, body, opts, data)}
+
+      :none_available ->
+        {:keep_state, enqueue(from, :buffered, method, path, headers, body, opts, data)}
+    end
+  end
+
+  defp forward_early_request(conn_pid, from, method, path, headers, body, opts, data) do
+    timeout = Keyword.get(opts, :receive_timeout, 15_000)
+    send(conn_pid, {:forward_early_request, from, method, path, headers, body, timeout})
     update_connection_stream_count(data, conn_pid, 1)
   end
 

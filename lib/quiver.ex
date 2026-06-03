@@ -126,6 +126,8 @@ defmodule Quiver do
 
   - `:name` -- atom identifying the `Quiver.Supervisor` (default: `Quiver.Pool`)
   - `:receive_timeout` -- max ms to wait for the response (default: 15,000)
+  - `:early_data` -- override HTTP/3 0-RTT eligibility for this request
+    (`true`/`false`); ignored by HTTP/1 and HTTP/2 pools
 
   ## Examples
 
@@ -142,6 +144,7 @@ defmodule Quiver do
   def request(%Request{} = request, opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, @default_name)
     timeout = Keyword.get(opts, :receive_timeout, @default_receive_timeout)
+    req_opts = [receive_timeout: timeout] ++ Keyword.take(opts, [:early_data])
 
     do_request(request, name, fn pool ->
       pool_mod = detect_pool_module(pool)
@@ -152,7 +155,7 @@ defmodule Quiver do
         build_path(request.url),
         request.headers,
         request.body,
-        receive_timeout: timeout
+        req_opts
       )
     end)
   end

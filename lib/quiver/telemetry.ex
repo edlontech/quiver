@@ -37,6 +37,13 @@ defmodule Quiver.Telemetry do
   - `[:quiver, :connection, :http3, :channel, :start]` -- measurements: `system_time` | metadata: `origin, method, path`
   - `[:quiver, :connection, :http3, :channel, :stop]` -- measurements: `duration` | metadata: `origin, close_reason`
   - `[:quiver, :connection, :http3, :channel, :exception]` -- measurements: `duration` | metadata: `origin, kind, reason`
+
+  ## HTTP/3 0-RTT Early Data
+
+  - `[:quiver, :connection, :http3, :ticket_received]` -- measurements: `lifetime, max_early_data` | metadata: `origin`
+  - `[:quiver, :connection, :http3, :early_data, :sent]` -- measurements: `count` | metadata: `origin, stream_id`
+  - `[:quiver, :connection, :http3, :early_data, :accepted]` -- measurements: `count` | metadata: `origin`
+  - `[:quiver, :connection, :http3, :early_data, :rejected]` -- measurements: `count` | metadata: `origin, reason`
   """
 
   @doc false
@@ -66,6 +73,11 @@ defmodule Quiver.Telemetry do
   @doc false
   @spec connection_http3_channel_event_prefix() :: [atom()]
   def connection_http3_channel_event_prefix, do: [:quiver, :connection, :http3, :channel]
+
+  @doc false
+  @spec connection_http3_early_data_event_prefix() :: [atom()]
+  def connection_http3_early_data_event_prefix,
+    do: [:quiver, :connection, :http3, :early_data]
 
   @doc false
   @spec span([atom()], map(), (-> {result, map()})) :: result when result: term()

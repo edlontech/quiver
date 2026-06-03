@@ -41,6 +41,23 @@ from aioquic.quic.events import (
 )
 from aioquic.quic.logger import QuicFileLogger
 
+class SessionTicketStore:
+    """In-memory store of TLS session tickets for 0-RTT resumption.
+
+    Mirrors aioquic's examples/http3_server.py. Configuring a fetcher makes
+    aioquic advertise max_early_data and accept 0-RTT for resumed sessions.
+    """
+
+    def __init__(self) -> None:
+        self.tickets: Dict[bytes, "SessionTicket"] = {}
+
+    def add(self, ticket) -> None:
+        self.tickets[ticket.ticket] = ticket
+
+    def pop(self, label: bytes):
+        return self.tickets.pop(label, None)
+
+
 # Push mappings: path -> list of resources to push
 PUSH_MAPPINGS = {
     "/index.html": ["/style.css", "/script.js"],
@@ -431,6 +448,8 @@ async def main(
     logger.info(f"Document root: {document_root}")
     logger.info(f"Server push: {'enabled' if enable_push else 'disabled'}")
 
+    store = SessionTicketStore()
+
     await serve(
         host,
         port,
@@ -438,6 +457,8 @@ async def main(
         create_protocol=lambda *args, **kwargs: HttpServerProtocol(
             *args, document_root=document_root, enable_push=enable_push, **kwargs
         ),
+        session_ticket_fetcher=store.pop,
+        session_ticket_handler=store.add,
         retry=False,
     )
 

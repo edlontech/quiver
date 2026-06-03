@@ -55,4 +55,9 @@ defmodule Quiver.TelemetryH3Test do
   test "connection_http3_event_prefix/0 returns expected prefix" do
     assert Quiver.Telemetry.connection_http3_event_prefix() == [:quiver, :connection, :http3]
   end
+
+  test "connection_http3_early_data_event_prefix/0 returns expected prefix" do
+    assert Quiver.Telemetry.connection_http3_early_data_event_prefix() ==
+             [:quiver, :connection, :http3, :early_data]
+  end
 end

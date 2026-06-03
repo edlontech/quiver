@@ -79,6 +79,13 @@ defmodule Quiver.Config do
               )
               |> Zoi.optional()
               |> Zoi.default(true),
+            early_data:
+              Zoi.boolean(
+                description:
+                  "Send eligible requests in the QUIC 0-RTT flight on resuming HTTP/3 connections (RFC 8470). Defaults to false; only valid with protocol: :http3."
+              )
+              |> Zoi.optional()
+              |> Zoi.default(false),
             connect_timeout:
               Zoi.integer(description: "TCP/TLS connect timeout in ms.")
               |> Zoi.gte(1)
@@ -175,6 +182,10 @@ defmodule Quiver.Config do
          InvalidPoolOpts.exception(
            errors: ["h3_datagram_enabled is only valid with protocol: :http3"]
          )}
+
+      Keyword.get(opts, :protocol) != :http3 and Keyword.get(opts, :early_data) == true ->
+        {:error,
+         InvalidPoolOpts.exception(errors: ["early_data is only valid with protocol: :http3"])}
 
       true ->
         {:ok, opts}

@@ -25,7 +25,7 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
   use GenStateMachine, callback_mode: [:state_functions, :state_enter]
 
-  @dialyzer {:nowarn_function, init: 1}
+  @dialyzer {:nowarn_function, [init: 1, early_keys?: 1, emit_early_outcome: 1]}
 
   alias Quiver.Conn.HTTP3, as: ConnHTTP3
   alias Quiver.Error.H3GoAway
@@ -33,6 +33,7 @@ defmodule Quiver.Pool.HTTP3.Connection do
   alias Quiver.Error.QUICHandshakeFailed
   alias Quiver.Error.QUICTransportError
   alias Quiver.HTTP3.Channel
+  alias Quiver.Pool.HTTP3.SessionTicket
   alias Quiver.Response
   alias Quiver.Telemetry
 
@@ -50,7 +51,9 @@ defmodule Quiver.Pool.HTTP3.Connection do
     monitors: %{},
     stream_to_ref: %{},
     stream_tasks: %{},
-    pending_during_connect: []
+    pending_during_connect: [],
+    early_capable: false,
+    replay_queue: []
   ]
 
   @default_stream_idle_timeout 30_000
@@ -71,7 +74,9 @@ defmodule Quiver.Pool.HTTP3.Connection do
           monitors: map(),
           stream_to_ref: map(),
           stream_tasks: map(),
-          pending_during_connect: [tuple()]
+          pending_during_connect: [tuple()],
+          early_capable: boolean(),
+          replay_queue: [tuple()]
         }
 
   @doc false
@@ -98,7 +103,8 @@ defmodule Quiver.Pool.HTTP3.Connection do
     config = Keyword.get(opts, :config, [])
     pool_pid = Keyword.get(opts, :pool_pid)
 
-    h3_opts = build_h3_opts(config)
+    ticket = Keyword.get(opts, :session_ticket)
+    h3_opts = build_h3_opts(config, ticket)
     handshake_start = System.monotonic_time()
     emit_start(origin, pool_pid)
 
@@ -114,7 +120,8 @@ defmodule Quiver.Pool.HTTP3.Connection do
           pool_pid: pool_pid,
           handshake_start: handshake_start,
           stream_idle_timeout:
-            Keyword.get(config, :stream_idle_timeout, @default_stream_idle_timeout)
+            Keyword.get(config, :stream_idle_timeout, @default_stream_idle_timeout),
+          early_capable: ticket != nil and early_keys?(h3_conn)
         }
 
         {:ok, :connecting, data}
@@ -161,7 +168,7 @@ defmodule Quiver.Pool.HTTP3.Connection do
     )
   end
 
-  defp build_h3_opts(config) do
+  defp build_h3_opts(config, ticket) do
     base = %{
       sync: false,
       alpn: [<<"h3">>],
@@ -171,8 +178,19 @@ defmodule Quiver.Pool.HTTP3.Connection do
     base
     |> maybe_put(:cacerts, Keyword.get(config, :cacerts))
     |> maybe_put(:settings, Keyword.get(config, :h3_settings))
-    |> maybe_put(:quic_opts, Keyword.get(config, :quic_opts))
+    |> maybe_put(:quic_opts, quic_opts_with_ticket(Keyword.get(config, :quic_opts), ticket))
     |> maybe_put_datagram(Keyword.get(config, :h3_datagram_enabled, true))
+  end
+
+  defp quic_opts_with_ticket(quic_opts, nil), do: quic_opts
+  defp quic_opts_with_ticket(nil, ticket), do: %{session_ticket: ticket}
+  defp quic_opts_with_ticket(:default, ticket), do: %{session_ticket: ticket}
+
+  defp quic_opts_with_ticket(quic_opts, ticket) when is_map(quic_opts),
+    do: Map.put(quic_opts, :session_ticket, ticket)
+
+  defp early_keys?(h3_conn) do
+    :quic.has_early_keys(:quic_h3.get_quic_conn(h3_conn))
   end
 
   defp maybe_put(map, _k, nil), do: map
@@ -190,8 +208,10 @@ defmodule Quiver.Pool.HTTP3.Connection do
   def connecting(:info, {:quic_h3, h3_conn, :connected}, %{h3_conn: h3_conn} = data) do
     fallback = Keyword.get(data.config, :initial_max_streams, 100)
     peer = ConnHTTP3.query_peer_max_streams(h3_conn, fallback)
+    emit_early_outcome(data)
     Enum.each(Enum.reverse(data.pending_during_connect), &send(self(), &1))
-    {:next_state, :connected, %{data | peer_max_streams: peer, pending_during_connect: []}}
+    data = drain_replay_queue(%{data | peer_max_streams: peer, pending_during_connect: []})
+    {:next_state, :connected, data}
   end
 
   def connecting(:info, {:quic_h3, h3_conn, :closed}, %{h3_conn: h3_conn} = data) do
@@ -223,6 +243,19 @@ defmodule Quiver.Pool.HTTP3.Connection do
     {:keep_state, %{data | pending_during_connect: [msg | data.pending_during_connect]}}
   end
 
+  def connecting(
+        :info,
+        {:forward_early_request, from, method, path, headers, body, timeout},
+        data
+      ) do
+    if data.early_capable do
+      open_early_request(data, from, method, path, headers, body, timeout)
+    else
+      msg = {:forward_request, from, method, path, headers, body, timeout}
+      {:keep_state, %{data | pending_during_connect: [msg | data.pending_during_connect]}}
+    end
+  end
+
   def connecting(:info, {:forward_stream, _from, _m, _p, _h, _b, _t} = msg, data) do
     {:keep_state, %{data | pending_during_connect: [msg | data.pending_during_connect]}}
   end
@@ -235,6 +268,24 @@ defmodule Quiver.Pool.HTTP3.Connection do
     emit_exception(data.origin, reason, data.handshake_start)
     fail_pending(data, QUICHandshakeFailed.exception(origin: data.origin, reason: reason))
     {:stop, :shutdown, data}
+  end
+
+  def connecting(
+        :info,
+        {:quic_h3, h3_conn, {:session_ticket, ticket}},
+        %{h3_conn: h3_conn} = data
+      ) do
+    notify_pool(data, {:session_ticket, ticket})
+    emit_ticket_received(data, ticket)
+    :keep_state_and_data
+  end
+
+  def connecting(
+        :info,
+        {:quic_h3, h3_conn, {:early_data_rejected, sids}},
+        %{h3_conn: h3_conn} = data
+      ) do
+    {:keep_state, handle_early_data_rejected(data, sids)}
   end
 
   def connecting(:info, {:quic_h3, _, _}, _data), do: :keep_state_and_data
@@ -263,6 +314,14 @@ defmodule Quiver.Pool.HTTP3.Connection do
   end
 
   def connected(:info, {:forward_request, from, method, path, headers, body, _timeout}, data) do
+    open_buffered_request(data, from, method, path, headers, body)
+  end
+
+  def connected(
+        :info,
+        {:forward_early_request, from, method, path, headers, body, _timeout},
+        data
+      ) do
     open_buffered_request(data, from, method, path, headers, body)
   end
 
@@ -302,6 +361,11 @@ defmodule Quiver.Pool.HTTP3.Connection do
   end
 
   def draining(:info, {:forward_request, from, _m, _p, _h, _b, _t}, data) do
+    reject_with_goaway(data, from)
+    :keep_state_and_data
+  end
+
+  def draining(:info, {:forward_early_request, from, _m, _p, _h, _b, _t}, data) do
     reject_with_goaway(data, from)
     :keep_state_and_data
   end
@@ -398,6 +462,24 @@ defmodule Quiver.Pool.HTTP3.Connection do
     end
 
     :keep_state_and_data
+  end
+
+  defp dispatch_event({:quic_h3, h3_conn, {:session_ticket, ticket}}, %{h3_conn: h3_conn} = data) do
+    notify_pool(data, {:session_ticket, ticket})
+    emit_ticket_received(data, ticket)
+    :keep_state_and_data
+  end
+
+  defp dispatch_event(
+         {:quic_h3, h3_conn, {:early_data_rejected, sids}},
+         %{h3_conn: h3_conn} = data
+       ) do
+    data = handle_early_data_rejected(data, sids)
+    {:keep_state, drain_replay_queue(data)}
+  end
+
+  defp dispatch_event({:replay_request, {method, path, headers, body, from, _timeout}}, data) do
+    open_buffered_request(data, from, method, path, headers, body)
   end
 
   defp dispatch_event({:quic_h3, _, _}, _data), do: :keep_state_and_data
@@ -600,6 +682,47 @@ defmodule Quiver.Pool.HTTP3.Connection do
     end
   end
 
+  defp open_early_request(data, from, method, path, headers, body, timeout) do
+    {caller_pid, _tag} = from
+
+    with {:ok, h3_headers} <- ConnHTTP3.build_headers(method, path, headers, data.origin),
+         {:ok, sid, task_pid} <- open_stream(data.h3_conn, inject_early_data(h3_headers), body) do
+      ref = make_ref()
+      mon = Process.monitor(caller_pid)
+
+      req =
+        early_request(from, caller_pid, mon, sid, {method, path, headers, body, from, timeout})
+
+      data = %{
+        data
+        | requests: Map.put(data.requests, ref, req),
+          monitors: Map.put(data.monitors, mon, ref),
+          stream_to_ref: Map.put(data.stream_to_ref, sid, ref),
+          stream_tasks: maybe_track_task(data.stream_tasks, ref, task_pid)
+      }
+
+      emit_early_sent(data, sid)
+      {:keep_state, data}
+    else
+      {:error, :not_connected} ->
+        msg = {:forward_request, from, method, path, headers, body, timeout}
+        {:keep_state, %{data | pending_during_connect: [msg | data.pending_during_connect]}}
+
+      {:error, _reason} ->
+        send(self(), {:forward_request, from, method, path, headers, body, timeout})
+        :keep_state_and_data
+    end
+  end
+
+  defp early_request(from, caller_pid, mon, sid, spec) do
+    from
+    |> build_request(caller_pid, mon, sid, :buffered)
+    |> Map.put(:early?, true)
+    |> Map.put(:spec, spec)
+  end
+
+  defp inject_early_data(h3_headers), do: h3_headers ++ [{<<"early-data">>, <<"1">>}]
+
   defp open_stream(pid, h3_headers, {:stream, enum}) do
     with {:ok, sid} <- :quic_h3.request(pid, h3_headers, %{end_stream: false}) do
       worker = self()
@@ -695,31 +818,57 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
   defp handle_response(data, sid, status, headers) do
     with_request(data, sid, fn ref, req ->
-      case req.mode do
-        :buffered ->
-          {:keep_state, put_request(data, ref, %{req | status: status, headers: headers})}
-
-        :streaming ->
-          req = %{
-            req
-            | status: status,
-              headers: headers,
-              phase: :awaiting_body,
-              idle_timer: schedule_idle_timeout(data, ref)
-          }
-
-          GenStateMachine.reply(req.from, {:ok, status, headers, ref, self()})
-          {:keep_state, put_request(data, ref, req)}
-
-        :datagram_channel ->
-          send(
-            req.channel_owner,
-            {:quiver_h3_channel, req.channel_ref, {:response, status, headers}}
-          )
-
-          {:keep_state, put_request(data, ref, %{req | status: status, headers: headers})}
+      if early_reject_425?(req, status) do
+        replay_after_425(data, ref, sid, req)
+      else
+        handle_response_normal(data, ref, req, status, headers)
       end
     end)
+  end
+
+  defp early_reject_425?(req, status), do: status == 425 and Map.get(req, :early?, false)
+
+  defp replay_after_425(data, ref, sid, req) do
+    Process.demonitor(req.monitor, [:flush])
+    _ = :quic_h3.cancel(data.h3_conn, sid)
+
+    data = %{
+      data
+      | requests: Map.delete(data.requests, ref),
+        monitors: Map.delete(data.monitors, req.monitor),
+        stream_to_ref: Map.delete(data.stream_to_ref, sid)
+    }
+
+    emit_early_rejected(data, 1, :too_early_425)
+    {method, path, headers, body, from, _timeout} = req.spec
+    open_buffered_request(data, from, method, path, headers, body)
+  end
+
+  defp handle_response_normal(data, ref, req, status, headers) do
+    case req.mode do
+      :buffered ->
+        {:keep_state, put_request(data, ref, %{req | status: status, headers: headers})}
+
+      :streaming ->
+        req = %{
+          req
+          | status: status,
+            headers: headers,
+            phase: :awaiting_body,
+            idle_timer: schedule_idle_timeout(data, ref)
+        }
+
+        GenStateMachine.reply(req.from, {:ok, status, headers, ref, self()})
+        {:keep_state, put_request(data, ref, req)}
+
+      :datagram_channel ->
+        send(
+          req.channel_owner,
+          {:quiver_h3_channel, req.channel_ref, {:response, status, headers}}
+        )
+
+        {:keep_state, put_request(data, ref, %{req | status: status, headers: headers})}
+    end
   end
 
   defp handle_data_chunk(data, sid, chunk) do
@@ -1062,6 +1211,41 @@ defmodule Quiver.Pool.HTTP3.Connection do
     %{data | requests: %{}, monitors: %{}, stream_to_ref: %{}, stream_tasks: %{}}
   end
 
+  defp handle_early_data_rejected(data, sids) do
+    {data, specs} =
+      Enum.reduce(sids, {data, []}, fn sid, {acc_data, acc_specs} ->
+        reject_early_stream(acc_data, sid, acc_specs)
+      end)
+
+    if specs != [], do: emit_early_rejected(data, length(specs), :early_data_rejected)
+    %{data | replay_queue: data.replay_queue ++ Enum.reverse(specs)}
+  end
+
+  defp reject_early_stream(data, sid, specs) do
+    with {:ok, ref} <- Map.fetch(data.stream_to_ref, sid),
+         {:ok, %{early?: true, spec: spec} = req} <- Map.fetch(data.requests, ref) do
+      Process.demonitor(req.monitor, [:flush])
+
+      data = %{
+        data
+        | requests: Map.delete(data.requests, ref),
+          monitors: Map.delete(data.monitors, req.monitor),
+          stream_to_ref: Map.delete(data.stream_to_ref, sid)
+      }
+
+      {data, [spec | specs]}
+    else
+      _ -> {data, specs}
+    end
+  end
+
+  defp drain_replay_queue(%{replay_queue: []} = data), do: data
+
+  defp drain_replay_queue(%{replay_queue: specs} = data) do
+    Enum.each(specs, fn spec -> send(self(), {:replay_request, spec}) end)
+    %{data | replay_queue: []}
+  end
+
   defp fail_pending(data, error) do
     Enum.each(data.pending_during_connect, fn
       {:forward_request, from, _m, _p, _h, _b, _t} ->
@@ -1079,6 +1263,10 @@ defmodule Quiver.Pool.HTTP3.Connection do
   end
 
   defp notify_pool(%{pool_pid: nil}, _), do: :ok
+
+  defp notify_pool(%{pool_pid: pid, origin: origin}, {:session_ticket, ticket}),
+    do: send(pid, {:session_ticket, origin, ticket})
+
   defp notify_pool(%{pool_pid: pid}, :stream_done), do: send(pid, {:stream_done, self()})
 
   defp notify_pool(%{pool_pid: pid}, :stream_open_failed),
@@ -1126,6 +1314,57 @@ defmodule Quiver.Pool.HTTP3.Connection do
       Telemetry.connection_http3_datagram_event_prefix() ++ [:dropped],
       %{system_time: System.system_time()},
       %{origin: data.origin, stream_id: sid, reason: reason}
+    )
+  end
+
+  defp emit_early_sent(data, sid) do
+    :telemetry.execute(
+      Telemetry.connection_http3_early_data_event_prefix() ++ [:sent],
+      %{count: 1},
+      %{origin: data.origin, stream_id: sid}
+    )
+  end
+
+  defp emit_early_outcome(%{early_capable: false}), do: :ok
+
+  defp emit_early_outcome(data) do
+    count = count_early(data)
+
+    case :quic_h3.early_data_accepted(data.h3_conn) do
+      true -> emit_early_accepted(data, count)
+      false -> emit_early_rejected(data, count, :early_data_rejected)
+      :unknown -> :ok
+    end
+  end
+
+  defp count_early(data) do
+    Enum.count(data.requests, fn {_ref, req} -> Map.get(req, :early?, false) end)
+  end
+
+  defp emit_early_accepted(data, count) do
+    :telemetry.execute(
+      Telemetry.connection_http3_early_data_event_prefix() ++ [:accepted],
+      %{count: count},
+      %{origin: data.origin}
+    )
+  end
+
+  defp emit_early_rejected(data, count, reason) do
+    :telemetry.execute(
+      Telemetry.connection_http3_early_data_event_prefix() ++ [:rejected],
+      %{count: count},
+      %{origin: data.origin, reason: reason}
+    )
+  end
+
+  defp emit_ticket_received(data, ticket) do
+    :telemetry.execute(
+      Telemetry.connection_http3_event_prefix() ++ [:ticket_received],
+      %{
+        lifetime: SessionTicket.lifetime(ticket) || 0,
+        max_early_data: SessionTicket.max_early_data(ticket) || 0
+      },
+      %{origin: data.origin}
     )
   end
 

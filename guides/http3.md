@@ -52,6 +52,7 @@ children = [
 | Option | Default | Description |
 |---|---|---|
 | `protocol` | `:auto` | Set to `:http3` to use this pool over QUIC. |
+| `early_data` | `false` | Send eligible requests in the QUIC 0-RTT flight on resuming connections (RFC 8470). Only valid with `protocol: :http3`. Safe methods (GET/HEAD/OPTIONS/TRACE) ride early by default; override per request with `early_data: true \| false`. |
 | `max_connections` | `1` | Per-origin upper bound on QUIC connections. Raise to parallelise large workloads. |
 | `initial_max_streams` | `100` | Local guess for the peer's stream limit; used until the handshake supplies the actual value. |
 | `quic_opts` | `%{}` | Map passed straight to `:quic.connect/3` for transport-level tuning (idle timeout, MTU, etc.). |
@@ -75,6 +76,28 @@ HTTP/3 over HTTP CONNECT-style proxies is not supported in v1. Combining
 `protocol: :http3` with any `proxy:` option in the same pool config raises
 `Quiver.Error.InvalidPoolOpts` at validation time. MASQUE (RFC 9484) support
 is a likely future addition; track the project changelog.
+
+### 0-RTT early data
+
+With `early_data: true` on a `protocol: :http3` pool, Quiver caches the
+server's session tickets and, on a *resuming* connection (cold pool,
+connection expansion, or post-idle reconnect), sends eligible requests in
+the QUIC 0-RTT flight with an `Early-Data: 1` header (RFC 8470).
+
+Only replay-safe methods (`GET`, `HEAD`, `OPTIONS`, `TRACE`) ride early by
+default (RFC 9001 §9.2). Override per request:
+
+    # force an unsafe method over 0-RTT (caller owns the replay risk)
+    Quiver.new(:post, url) |> Quiver.body(body) |> Quiver.request(early_data: true)
+
+    # force 1-RTT for a safe method
+    Quiver.new(:get, url) |> Quiver.request(early_data: false)
+
+Rejection is invisible to callers: a transport-level rejection or an HTTP
+`425 Too Early` is transparently replayed at 1-RTT (without `Early-Data`).
+No ticket, no early keys, an expired ticket, or `max_early_data == 0` all
+degrade gracefully to ordinary 1-RTT. Tickets live in the per-origin pool
+process and are lost (graceful fallback) if it restarts.
 
 ## Making requests
 
@@ -228,6 +251,15 @@ pool queue events, HTTP/3 emits connection-level events under
 | `[:quiver, :connection, :http3, :stop]` | `duration` | `origin`, `peer_max_streams` |
 | `[:quiver, :connection, :http3, :exception]` | `duration` | `origin`, `reason`, `kind` |
 | `[:quiver, :connection, :http3, :draining]` | `system_time` | `origin`, `last_stream_id`, `error_code` |
+| `[:quiver, :connection, :http3, :ticket_received]` | `lifetime`, `max_early_data` | `origin` |
+| `[:quiver, :connection, :http3, :early_data, :sent]` | `count` | `origin`, `stream_id` |
+| `[:quiver, :connection, :http3, :early_data, :accepted]` | `count` | `origin` |
+| `[:quiver, :connection, :http3, :early_data, :rejected]` | `count` | `origin`, `reason` (`:early_data_rejected` \| `:too_early_425`) |
+
+`:ticket_received` fires when a session ticket is cached. `:early_data, :sent`
+fires when a request is issued over 0-RTT. `:early_data, :accepted` fires when
+the server accepts 0-RTT on a resuming connection; `:early_data, :rejected`
+fires when 0-RTT is rejected and the affected requests are replayed at 1-RTT.
 
 `:start` fires before `:quic_h3.connect/3` is called. `:stop` fires when the
 worker enters `:connected` (handshake complete and peer SETTINGS received).
@@ -242,11 +274,6 @@ The prefix is exposed for convenience as
 
 ## TODOs
 
-- **No 0-RTT.** All handshakes are full 1-RTT. Session tickets emitted by the
-  server are silently dropped because `:quic_h3` does not forward the
-  `{session_ticket, _}` event to its owner, and the H3 state machine rejects
-  requests pre-`connected` so the underlying QUIC's 0-RTT machinery cannot
-  be reached. We need to patch the upstream before implementing this.
 - **No WebTransport / Connect-UDP / MASQUE.**
 - **No proxy support.** CONNECT tunnelling is not implemented for HTTP/3.
   Combining `protocol: :http3` with a `proxy:` option fails validation.

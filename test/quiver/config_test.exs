@@ -178,6 +178,27 @@ defmodule Quiver.ConfigTest do
       assert {:error, %InvalidPoolOpts{}} =
                Config.validate_pool(proxy: [host: "proxy.example.com", port: 8080, scheme: :ftp])
     end
+
+    test "defaults early_data to false" do
+      assert {:ok, config} = Config.validate_pool([])
+      assert Keyword.get(config, :early_data) == false
+    end
+
+    test "accepts early_data: true on a :http3 pool" do
+      assert {:ok, config} = Config.validate_pool(protocol: :http3, early_data: true)
+      assert Keyword.get(config, :early_data) == true
+    end
+
+    test "rejects early_data: true on a non-:http3 pool" do
+      assert {:error, %InvalidPoolOpts{}} =
+               Config.validate_pool(protocol: :http2, early_data: true)
+
+      assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(early_data: true)
+    end
+
+    test "rejects non-boolean early_data" do
+      assert {:error, %InvalidPoolOpts{}} = Config.validate_pool(early_data: :yes)
+    end
   end
 
   describe ":http3 protocol option" do
