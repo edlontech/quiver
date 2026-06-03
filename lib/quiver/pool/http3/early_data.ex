@@ -5,9 +5,11 @@ defmodule Quiver.Pool.HTTP3.EarlyData do
 
   @safe_methods [:get, :head, :options, :trace]
 
+  @doc false
   @spec enabled?(keyword()) :: boolean()
   def enabled?(config), do: Keyword.get(config, :early_data, false) == true
 
+  @doc false
   @spec eligible?(atom(), keyword(), keyword()) :: boolean()
   def eligible?(method, opts, config) do
     cond do

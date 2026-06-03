@@ -10,6 +10,7 @@ defmodule Quiver.Pool.HTTP3.SessionTicket do
   @fields Record.extract(:session_ticket, from_lib: "quic/include/quic.hrl")
   Record.defrecordp(:session_ticket, @fields)
 
+  @doc false
   @spec lifetime(term()) :: non_neg_integer() | nil
   def lifetime(ticket) when Record.is_record(ticket, :session_ticket) do
     session_ticket(ticket, :lifetime)
@@ -17,6 +18,7 @@ defmodule Quiver.Pool.HTTP3.SessionTicket do
 
   def lifetime(_other), do: nil
 
+  @doc false
   @spec max_early_data(term()) :: non_neg_integer() | nil
   def max_early_data(ticket) when Record.is_record(ticket, :session_ticket) do
     session_ticket(ticket, :max_early_data)
