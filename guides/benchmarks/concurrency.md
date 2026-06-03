@@ -1,6 +1,6 @@
 Benchmark
 
-Benchmark run from 2026-03-06 20:27:17.455600Z UTC
+Benchmark run from 2026-06-03 12:05:54.301425Z UTC
 
 ## System
 
@@ -64,19 +64,19 @@ Run Time
   <tr>
     <td style="white-space: nowrap">http1</td>
     <td style="white-space: nowrap; text-align: right">1.54 K</td>
-    <td style="white-space: nowrap; text-align: right">0.65 ms</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;31.90%</td>
-    <td style="white-space: nowrap; text-align: right">0.63 ms</td>
-    <td style="white-space: nowrap; text-align: right">1.19 ms</td>
+    <td style="white-space: nowrap; text-align: right">650.61 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;29.81%</td>
+    <td style="white-space: nowrap; text-align: right">633.71 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">1176.38 &micro;s</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">http2</td>
-    <td style="white-space: nowrap; text-align: right">0.99 K</td>
-    <td style="white-space: nowrap; text-align: right">1.01 ms</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;15.37%</td>
-    <td style="white-space: nowrap; text-align: right">1.01 ms</td>
-    <td style="white-space: nowrap; text-align: right">1.42 ms</td>
+    <td style="white-space: nowrap; text-align: right">1.03 K</td>
+    <td style="white-space: nowrap; text-align: right">969.20 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;13.67%</td>
+    <td style="white-space: nowrap; text-align: right">963.29 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">1317.42 &micro;s</td>
   </tr>
 
 </table>
@@ -97,8 +97,8 @@ Run Time Comparison
 
   <tr>
     <td style="white-space: nowrap">http2</td>
-    <td style="white-space: nowrap; text-align: right">0.99 K</td>
-    <td style="white-space: nowrap; text-align: right">1.56x</td>
+    <td style="white-space: nowrap; text-align: right">1.03 K</td>
+    <td style="white-space: nowrap; text-align: right">1.49x</td>
   </tr>
 
 </table>
@@ -115,12 +115,12 @@ Memory Usage
   </tr>
   <tr>
     <td style="white-space: nowrap">http1</td>
-    <td style="white-space: nowrap">7.98 KB</td>
+    <td style="white-space: nowrap">7.92 KB</td>
     <td>&nbsp;</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">http2</td>
-    <td style="white-space: nowrap">0.73 KB</td>
+    <td style="white-space: nowrap">0.74 KB</td>
     <td>0.09x</td>
   </tr>
 </table>
@@ -137,7 +137,7 @@ Reduction Count
   </tr>
   <tr>
     <td style="white-space: nowrap">http1</td>
-    <td style="white-space: nowrap">815.40</td>
+    <td style="white-space: nowrap">824.06</td>
     <td>&nbsp;</td>
   </tr>
     <tr>

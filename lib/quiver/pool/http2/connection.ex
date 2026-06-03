@@ -40,6 +40,16 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
   @stream_idle_timeout 30_000
 
+  @doc false
+  def child_spec(opts) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      type: :worker,
+      restart: :temporary
+    }
+  end
+
   @doc "Starts the connection worker and performs the HTTP/2 handshake."
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do

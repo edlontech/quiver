@@ -282,6 +282,43 @@ defmodule Quiver.Pool.HTTP3ResilienceTest do
     end
   end
 
+  describe "worker isolation" do
+    setup do
+      handler = fn h3_conn, sid, _method, _path, _headers ->
+        :quic_h3.send_response(h3_conn, sid, 200, [])
+        :quic_h3.send_data(h3_conn, sid, "ok", true)
+      end
+
+      {:ok, server} = H3TestServer.start(handler)
+      on_exit(fn -> H3TestServer.stop(server.name) end)
+
+      {:ok, server: server, config: [verify: :verify_none, cacerts: server.cacerts]}
+    end
+
+    test "coordinator survives an abnormal worker exit", %{server: server, config: config} do
+      Process.flag(:trap_exit, true)
+
+      {:ok, pool} =
+        HTTP3.start_link(origin: {:https, "localhost", server.port}, pool_opts: config)
+
+      assert {:ok, %Response{status: 200}} =
+               HTTP3.request(pool, :get, "/", [], nil, receive_timeout: 5_000)
+
+      [{worker, _info}] = pool_connections(pool)
+      pool_mon = Process.monitor(pool)
+
+      Process.exit(worker, :kill)
+
+      refute_receive {:DOWN, ^pool_mon, :process, ^pool, _reason}, 300
+      assert Process.alive?(pool)
+
+      assert_eventually(worker not in Enum.map(pool_connections(pool), &elem(&1, 0)))
+
+      assert {:ok, %Response{status: 200}} =
+               HTTP3.request(pool, :get, "/", [], nil, receive_timeout: 5_000)
+    end
+  end
+
   describe "caller cancellation" do
     setup do
       handler = fn h3_conn, sid, _method, _path, _headers ->

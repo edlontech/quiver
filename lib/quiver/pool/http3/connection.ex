@@ -81,7 +81,12 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
   @doc false
   def child_spec(opts),
-    do: %{id: __MODULE__, start: {__MODULE__, :start_link, [opts]}, type: :worker}
+    do: %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      type: :worker,
+      restart: :temporary
+    }
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts), do: GenStateMachine.start_link(__MODULE__, opts)

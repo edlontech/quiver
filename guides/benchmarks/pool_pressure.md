@@ -1,6 +1,6 @@
 Benchmark
 
-Benchmark run from 2026-03-06 20:30:30.250306Z UTC
+Benchmark run from 2026-06-03 12:09:07.171692Z UTC
 
 ## System
 
@@ -63,29 +63,29 @@ Run Time
 
   <tr>
     <td style="white-space: nowrap">http2 (max_connections: 5)</td>
-    <td style="white-space: nowrap; text-align: right">90.75</td>
-    <td style="white-space: nowrap; text-align: right">11.02 ms</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;1.68%</td>
+    <td style="white-space: nowrap; text-align: right">90.83</td>
+    <td style="white-space: nowrap; text-align: right">11.01 ms</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;1.48%</td>
     <td style="white-space: nowrap; text-align: right">11.00 ms</td>
-    <td style="white-space: nowrap; text-align: right">11.72 ms</td>
+    <td style="white-space: nowrap; text-align: right">11.48 ms</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">http2 (max_connections: 1)</td>
-    <td style="white-space: nowrap; text-align: right">88.40</td>
-    <td style="white-space: nowrap; text-align: right">11.31 ms</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;6.12%</td>
-    <td style="white-space: nowrap; text-align: right">11.05 ms</td>
-    <td style="white-space: nowrap; text-align: right">13.64 ms</td>
+    <td style="white-space: nowrap; text-align: right">90.64</td>
+    <td style="white-space: nowrap; text-align: right">11.03 ms</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;2.55%</td>
+    <td style="white-space: nowrap; text-align: right">11.00 ms</td>
+    <td style="white-space: nowrap; text-align: right">11.93 ms</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">http1 (size: 2)</td>
-    <td style="white-space: nowrap; text-align: right">9.07</td>
-    <td style="white-space: nowrap; text-align: right">110.31 ms</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;0.85%</td>
-    <td style="white-space: nowrap; text-align: right">110.02 ms</td>
-    <td style="white-space: nowrap; text-align: right">115.14 ms</td>
+    <td style="white-space: nowrap; text-align: right">9.09</td>
+    <td style="white-space: nowrap; text-align: right">110.06 ms</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;0.26%</td>
+    <td style="white-space: nowrap; text-align: right">110.00 ms</td>
+    <td style="white-space: nowrap; text-align: right">111.14 ms</td>
   </tr>
 
 </table>
@@ -100,20 +100,20 @@ Run Time Comparison
     <th style="text-align: right">Slower</th>
   <tr>
     <td style="white-space: nowrap">http2 (max_connections: 5)</td>
-    <td style="white-space: nowrap;text-align: right">90.75</td>
+    <td style="white-space: nowrap;text-align: right">90.83</td>
     <td>&nbsp;</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">http2 (max_connections: 1)</td>
-    <td style="white-space: nowrap; text-align: right">88.40</td>
-    <td style="white-space: nowrap; text-align: right">1.03x</td>
+    <td style="white-space: nowrap; text-align: right">90.64</td>
+    <td style="white-space: nowrap; text-align: right">1.0x</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">http1 (size: 2)</td>
-    <td style="white-space: nowrap; text-align: right">9.07</td>
-    <td style="white-space: nowrap; text-align: right">10.01x</td>
+    <td style="white-space: nowrap; text-align: right">9.09</td>
+    <td style="white-space: nowrap; text-align: right">10.0x</td>
   </tr>
 
 </table>
@@ -130,18 +130,18 @@ Memory Usage
   </tr>
   <tr>
     <td style="white-space: nowrap">http2 (max_connections: 5)</td>
-    <td style="white-space: nowrap">716.85 B</td>
+    <td style="white-space: nowrap">742.33 B</td>
     <td>&nbsp;</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">http2 (max_connections: 1)</td>
-    <td style="white-space: nowrap">713.39 B</td>
+    <td style="white-space: nowrap">740.92 B</td>
     <td>1.0x</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">http1 (size: 2)</td>
-    <td style="white-space: nowrap">8176 B</td>
-    <td>11.41x</td>
+    <td style="white-space: nowrap">8120 B</td>
+    <td>10.94x</td>
   </tr>
 </table>
 
@@ -167,7 +167,7 @@ Reduction Count
   </tr>
     <tr>
     <td style="white-space: nowrap">http1 (size: 2)</td>
-    <td style="white-space: nowrap">817.91</td>
-    <td>32.72x</td>
+    <td style="white-space: nowrap">828</td>
+    <td>33.12x</td>
   </tr>
 </table>

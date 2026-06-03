@@ -39,6 +39,7 @@ defmodule Quiver.Pool.HTTP3 do
   defstruct [
     :origin,
     :config,
+    :conn_sup,
     connections: %{},
     waiting: :queue.new(),
     max_connections: 1,
@@ -50,6 +51,7 @@ defmodule Quiver.Pool.HTTP3 do
   @type t :: %__MODULE__{
           origin: term(),
           config: keyword(),
+          conn_sup: pid() | nil,
           connections: map(),
           waiting: :queue.queue(),
           max_connections: pos_integer(),
@@ -199,9 +201,12 @@ defmodule Quiver.Pool.HTTP3 do
 
     case Registration.register(self(), name) do
       :ok ->
+        {:ok, conn_sup} = DynamicSupervisor.start_link(strategy: :one_for_one)
+
         data = %__MODULE__{
           origin: origin,
           config: config,
+          conn_sup: conn_sup,
           max_connections: Keyword.get(config, :max_connections, 1),
           checkout_timeout: Keyword.get(config, :checkout_timeout, 5_000)
         }
@@ -438,7 +443,7 @@ defmodule Quiver.Pool.HTTP3 do
       [origin: data.origin, config: data.config, pool_pid: self()]
       |> maybe_put_session_ticket(ticket)
 
-    case Connection.start_link(opts) do
+    case DynamicSupervisor.start_child(data.conn_sup, {Connection, opts}) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
         conn_info = %{ref: ref, stream_count: 0, max_streams: 0, state: :connecting}

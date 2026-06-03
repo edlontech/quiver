@@ -1,6 +1,6 @@
 Benchmark
 
-Benchmark run from 2026-03-07 17:27:27.744752Z UTC
+Benchmark run from 2026-06-03 12:21:28.920914Z UTC
 
 ## System
 
@@ -63,56 +63,56 @@ Run Time
 
   <tr>
     <td style="white-space: nowrap">quiver http1</td>
-    <td style="white-space: nowrap; text-align: right">3.74 K</td>
-    <td style="white-space: nowrap; text-align: right">267.46 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;23.59%</td>
-    <td style="white-space: nowrap; text-align: right">261.71 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">441.58 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">3.77 K</td>
+    <td style="white-space: nowrap; text-align: right">265.56 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;22.49%</td>
+    <td style="white-space: nowrap; text-align: right">260.75 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">427.46 &micro;s</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">tesla+quiver http1</td>
-    <td style="white-space: nowrap; text-align: right">3.69 K</td>
-    <td style="white-space: nowrap; text-align: right">270.73 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;23.94%</td>
-    <td style="white-space: nowrap; text-align: right">265.54 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">427.96 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">3.72 K</td>
+    <td style="white-space: nowrap; text-align: right">269.17 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;27.59%</td>
+    <td style="white-space: nowrap; text-align: right">262.63 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">443.90 &micro;s</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">tesla+finch http1</td>
-    <td style="white-space: nowrap; text-align: right">2.98 K</td>
-    <td style="white-space: nowrap; text-align: right">335.36 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;27.00%</td>
-    <td style="white-space: nowrap; text-align: right">325.21 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">598.21 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">2.99 K</td>
+    <td style="white-space: nowrap; text-align: right">334.67 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;18.27%</td>
+    <td style="white-space: nowrap; text-align: right">328.79 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">500.75 &micro;s</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">quiver http2</td>
-    <td style="white-space: nowrap; text-align: right">2.40 K</td>
-    <td style="white-space: nowrap; text-align: right">416.78 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;22.78%</td>
-    <td style="white-space: nowrap; text-align: right">407.33 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">681.54 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">2.50 K</td>
+    <td style="white-space: nowrap; text-align: right">399.39 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;22.87%</td>
+    <td style="white-space: nowrap; text-align: right">390.42 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">664.85 &micro;s</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">tesla+quiver http2</td>
-    <td style="white-space: nowrap; text-align: right">2.37 K</td>
-    <td style="white-space: nowrap; text-align: right">421.33 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;18.02%</td>
-    <td style="white-space: nowrap; text-align: right">416.15 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">621.04 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">2.32 K</td>
+    <td style="white-space: nowrap; text-align: right">431.92 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;26.80%</td>
+    <td style="white-space: nowrap; text-align: right">419.00 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">740.11 &micro;s</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">tesla+finch http2</td>
-    <td style="white-space: nowrap; text-align: right">1.90 K</td>
-    <td style="white-space: nowrap; text-align: right">526.29 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;27.49%</td>
-    <td style="white-space: nowrap; text-align: right">501.63 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">967.32 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">0.0617 K</td>
+    <td style="white-space: nowrap; text-align: right">16219.83 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;28.30%</td>
+    <td style="white-space: nowrap; text-align: right">15654.90 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">29577.56 &micro;s</td>
   </tr>
 
 </table>
@@ -127,38 +127,38 @@ Run Time Comparison
     <th style="text-align: right">Slower</th>
   <tr>
     <td style="white-space: nowrap">quiver http1</td>
-    <td style="white-space: nowrap;text-align: right">3.74 K</td>
+    <td style="white-space: nowrap;text-align: right">3.77 K</td>
     <td>&nbsp;</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">tesla+quiver http1</td>
-    <td style="white-space: nowrap; text-align: right">3.69 K</td>
+    <td style="white-space: nowrap; text-align: right">3.72 K</td>
     <td style="white-space: nowrap; text-align: right">1.01x</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">tesla+finch http1</td>
-    <td style="white-space: nowrap; text-align: right">2.98 K</td>
-    <td style="white-space: nowrap; text-align: right">1.25x</td>
+    <td style="white-space: nowrap; text-align: right">2.99 K</td>
+    <td style="white-space: nowrap; text-align: right">1.26x</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">quiver http2</td>
-    <td style="white-space: nowrap; text-align: right">2.40 K</td>
-    <td style="white-space: nowrap; text-align: right">1.56x</td>
+    <td style="white-space: nowrap; text-align: right">2.50 K</td>
+    <td style="white-space: nowrap; text-align: right">1.5x</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">tesla+quiver http2</td>
-    <td style="white-space: nowrap; text-align: right">2.37 K</td>
-    <td style="white-space: nowrap; text-align: right">1.58x</td>
+    <td style="white-space: nowrap; text-align: right">2.32 K</td>
+    <td style="white-space: nowrap; text-align: right">1.63x</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">tesla+finch http2</td>
-    <td style="white-space: nowrap; text-align: right">1.90 K</td>
-    <td style="white-space: nowrap; text-align: right">1.97x</td>
+    <td style="white-space: nowrap; text-align: right">0.0617 K</td>
+    <td style="white-space: nowrap; text-align: right">61.08x</td>
   </tr>
 
 </table>
@@ -180,13 +180,13 @@ Memory Usage
   </tr>
     <tr>
     <td style="white-space: nowrap">tesla+quiver http1</td>
-    <td style="white-space: nowrap">12.27 KB</td>
-    <td>1.56x</td>
+    <td style="white-space: nowrap">12.38 KB</td>
+    <td>1.57x</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">tesla+finch http1</td>
-    <td style="white-space: nowrap">13.82 KB</td>
-    <td>1.75x</td>
+    <td style="white-space: nowrap">13.65 KB</td>
+    <td>1.73x</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">quiver http2</td>
@@ -195,13 +195,13 @@ Memory Usage
   </tr>
     <tr>
     <td style="white-space: nowrap">tesla+quiver http2</td>
-    <td style="white-space: nowrap">4.69 KB</td>
-    <td>0.6x</td>
+    <td style="white-space: nowrap">4.80 KB</td>
+    <td>0.61x</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">tesla+finch http2</td>
-    <td style="white-space: nowrap">5.94 KB</td>
-    <td>0.75x</td>
+    <td style="white-space: nowrap">227.90 KB</td>
+    <td>28.94x</td>
   </tr>
 </table>
 
@@ -217,32 +217,32 @@ Reduction Count
   </tr>
   <tr>
     <td style="white-space: nowrap">quiver http1</td>
-    <td style="white-space: nowrap">827.36</td>
+    <td style="white-space: nowrap">0.83 K</td>
     <td>&nbsp;</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">tesla+quiver http1</td>
-    <td style="white-space: nowrap">1153.37</td>
-    <td>1.39x</td>
+    <td style="white-space: nowrap">1.17 K</td>
+    <td>1.41x</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">tesla+finch http1</td>
-    <td style="white-space: nowrap">1150.50</td>
-    <td>1.39x</td>
+    <td style="white-space: nowrap">1.18 K</td>
+    <td>1.43x</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">quiver http2</td>
-    <td style="white-space: nowrap">25.00</td>
+    <td style="white-space: nowrap">0.0250 K</td>
     <td>0.03x</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">tesla+quiver http2</td>
-    <td style="white-space: nowrap">350.00</td>
-    <td>0.42x</td>
+    <td style="white-space: nowrap">0.36 K</td>
+    <td>0.44x</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">tesla+finch http2</td>
-    <td style="white-space: nowrap">430.94</td>
-    <td>0.52x</td>
+    <td style="white-space: nowrap">33.32 K</td>
+    <td>40.28x</td>
   </tr>
 </table>

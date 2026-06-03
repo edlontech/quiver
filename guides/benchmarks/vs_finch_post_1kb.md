@@ -1,6 +1,6 @@
 Benchmark
 
-Benchmark run from 2026-03-06 20:39:08.339752Z UTC
+Benchmark run from 2026-06-03 12:17:42.951566Z UTC
 
 ## System
 
@@ -63,38 +63,38 @@ Run Time
 
   <tr>
     <td style="white-space: nowrap">quiver http1</td>
-    <td style="white-space: nowrap; text-align: right">3.72 K</td>
-    <td style="white-space: nowrap; text-align: right">268.92 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;22.58%</td>
-    <td style="white-space: nowrap; text-align: right">264.08 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">433.63 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">3.77 K</td>
+    <td style="white-space: nowrap; text-align: right">265.54 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;22.48%</td>
+    <td style="white-space: nowrap; text-align: right">260.63 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">426.92 &micro;s</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">finch http1</td>
-    <td style="white-space: nowrap; text-align: right">2.93 K</td>
-    <td style="white-space: nowrap; text-align: right">341.11 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;26.88%</td>
-    <td style="white-space: nowrap; text-align: right">331.33 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">600.09 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">2.85 K</td>
+    <td style="white-space: nowrap; text-align: right">350.43 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;26.34%</td>
+    <td style="white-space: nowrap; text-align: right">341.21 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">598.14 &micro;s</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">quiver http2</td>
-    <td style="white-space: nowrap; text-align: right">2.44 K</td>
-    <td style="white-space: nowrap; text-align: right">409.21 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;19.37%</td>
-    <td style="white-space: nowrap; text-align: right">402.88 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">623.71 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">2.54 K</td>
+    <td style="white-space: nowrap; text-align: right">393.58 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;19.65%</td>
+    <td style="white-space: nowrap; text-align: right">387.46 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">600.71 &micro;s</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">finch http2</td>
-    <td style="white-space: nowrap; text-align: right">1.35 K</td>
-    <td style="white-space: nowrap; text-align: right">742.81 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">&plusmn;41.15%</td>
-    <td style="white-space: nowrap; text-align: right">663.54 &micro;s</td>
-    <td style="white-space: nowrap; text-align: right">1760.49 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">1.56 K</td>
+    <td style="white-space: nowrap; text-align: right">640.56 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">&plusmn;39.48%</td>
+    <td style="white-space: nowrap; text-align: right">580.17 &micro;s</td>
+    <td style="white-space: nowrap; text-align: right">1473.93 &micro;s</td>
   </tr>
 
 </table>
@@ -109,26 +109,26 @@ Run Time Comparison
     <th style="text-align: right">Slower</th>
   <tr>
     <td style="white-space: nowrap">quiver http1</td>
-    <td style="white-space: nowrap;text-align: right">3.72 K</td>
+    <td style="white-space: nowrap;text-align: right">3.77 K</td>
     <td>&nbsp;</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">finch http1</td>
-    <td style="white-space: nowrap; text-align: right">2.93 K</td>
-    <td style="white-space: nowrap; text-align: right">1.27x</td>
+    <td style="white-space: nowrap; text-align: right">2.85 K</td>
+    <td style="white-space: nowrap; text-align: right">1.32x</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">quiver http2</td>
-    <td style="white-space: nowrap; text-align: right">2.44 K</td>
-    <td style="white-space: nowrap; text-align: right">1.52x</td>
+    <td style="white-space: nowrap; text-align: right">2.54 K</td>
+    <td style="white-space: nowrap; text-align: right">1.48x</td>
   </tr>
 
   <tr>
     <td style="white-space: nowrap">finch http2</td>
-    <td style="white-space: nowrap; text-align: right">1.35 K</td>
-    <td style="white-space: nowrap; text-align: right">2.76x</td>
+    <td style="white-space: nowrap; text-align: right">1.56 K</td>
+    <td style="white-space: nowrap; text-align: right">2.41x</td>
   </tr>
 
 </table>
@@ -145,23 +145,23 @@ Memory Usage
   </tr>
   <tr>
     <td style="white-space: nowrap">quiver http1</td>
-    <td style="white-space: nowrap">8.89 KB</td>
+    <td style="white-space: nowrap">8.80 KB</td>
     <td>&nbsp;</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">finch http1</td>
-    <td style="white-space: nowrap">13.65 KB</td>
-    <td>1.54x</td>
+    <td style="white-space: nowrap">13.82 KB</td>
+    <td>1.57x</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">quiver http2</td>
-    <td style="white-space: nowrap">0.76 KB</td>
+    <td style="white-space: nowrap">0.77 KB</td>
     <td>0.09x</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">finch http2</td>
-    <td style="white-space: nowrap">5.08 KB</td>
-    <td>0.57x</td>
+    <td style="white-space: nowrap">5.20 KB</td>
+    <td>0.59x</td>
   </tr>
 </table>
 
@@ -177,13 +177,13 @@ Reduction Count
   </tr>
   <tr>
     <td style="white-space: nowrap">quiver http1</td>
-    <td style="white-space: nowrap">866.11</td>
+    <td style="white-space: nowrap">886.93</td>
     <td>&nbsp;</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">finch http1</td>
-    <td style="white-space: nowrap">1175.43</td>
-    <td>1.36x</td>
+    <td style="white-space: nowrap">1238.55</td>
+    <td>1.4x</td>
   </tr>
     <tr>
     <td style="white-space: nowrap">quiver http2</td>
@@ -192,7 +192,7 @@ Reduction Count
   </tr>
     <tr>
     <td style="white-space: nowrap">finch http2</td>
-    <td style="white-space: nowrap">321.32</td>
-    <td>0.37x</td>
+    <td style="white-space: nowrap">366.91</td>
+    <td>0.41x</td>
   </tr>
 </table>
