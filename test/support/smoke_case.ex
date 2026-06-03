@@ -3,16 +3,26 @@ defmodule Quiver.SmokeCase do
   ExUnit case template for HTTP/3 docker smoke tests.
 
   Tags `:smoke` on the using module. At module load time, attempts a
-  real QUIC handshake against UDP/4435 with a 1.5 s timeout. On failure
-  the module is tagged `skip: msg` so ExUnit skips its tests with a
-  clear message locally, or `SMOKE_REQUIRE=1` (used by CI) flips that
-  into a hard failure via `setup_all`.
+  real QUIC handshake against UDP/4435. On failure the module is tagged
+  `skip: msg` so ExUnit skips its tests with a clear message locally, or
+  `SMOKE_REQUIRE=1` (used by CI) flips that into a hard failure via
+  `setup_all`.
   """
   use ExUnit.CaseTemplate
 
   @h3_port 4435
-  @probe_timeout_ms 1_500
   @probe_key {__MODULE__, :probe_result}
+
+  # A cold CI runner pays msquic's one-time NIF init on the first handshake, and
+  # several smoke modules probe concurrently during parallel compilation, so the
+  # first QUIC+H3 connect can take a few seconds. Match the pool's default
+  # connect_timeout (5 s) and, when smoke is mandatory (CI), retry a handful of
+  # times so a cold-start blip doesn't invalidate the suite. Locally a single
+  # short attempt keeps `mix test.smoke` snappy when the server is down.
+  @probe_timeout_ms 5_000
+  @probe_attempts 5
+  @probe_retry_ms 500
+  @local_probe_timeout_ms 1_500
 
   using do
     case Quiver.SmokeCase.maybe_probe() do
@@ -68,7 +78,7 @@ defmodule Quiver.SmokeCase do
 
   @doc false
   # Memoize via :persistent_term so N smoke modules compiled in one VM only pay
-  # the 1.5 s handshake cost once. Concurrent compile may double-probe; acceptable.
+  # the handshake cost once. Concurrent compile may double-probe; acceptable.
   def maybe_probe do
     case :persistent_term.get(@probe_key, :unset) do
       :unset ->
@@ -82,15 +92,27 @@ defmodule Quiver.SmokeCase do
   end
 
   defp do_probe do
-    opts = %{verify: :verify_none, sync: true, connect_timeout: @probe_timeout_ms}
+    if System.get_env("SMOKE_REQUIRE") == "1" do
+      probe(@probe_timeout_ms, @probe_attempts)
+    else
+      probe(@local_probe_timeout_ms, 1)
+    end
+  end
+
+  defp probe(timeout, attempts_left) do
+    opts = %{verify: :verify_none, sync: true, connect_timeout: timeout}
 
     case :quic_h3.connect(~c"localhost", @h3_port, opts) do
       {:ok, conn} ->
         _ = :quic_h3.close(conn)
         :ok
 
-      {:error, reason} ->
+      {:error, reason} when attempts_left <= 1 ->
         {:error, reason}
+
+      {:error, _reason} ->
+        Process.sleep(@probe_retry_ms)
+        probe(timeout, attempts_left - 1)
     end
   end
 end
