@@ -103,7 +103,7 @@ defmodule Quiver.Test.H3DatagramTestServer do
   defp handle_route(owner, h3_conn, sid, "/echo") do
     send(owner, {:register_stream, h3_conn, sid, :echo})
     :quic_h3.send_response(h3_conn, sid, 200, [])
-    :ok
+    flush_response_headers(h3_conn, sid)
   end
 
   defp handle_route(_owner, h3_conn, sid, "/reject") do
@@ -132,7 +132,7 @@ defmodule Quiver.Test.H3DatagramTestServer do
   defp handle_route(owner, h3_conn, sid, "/big") do
     send(owner, {:register_stream, h3_conn, sid, :echo})
     :quic_h3.send_response(h3_conn, sid, 200, [])
-    :ok
+    flush_response_headers(h3_conn, sid)
   end
 
   defp handle_route(owner, h3_conn, sid, "/extended-connect") do
@@ -144,6 +144,15 @@ defmodule Quiver.Test.H3DatagramTestServer do
   defp handle_route(_owner, h3_conn, sid, _path) do
     :quic_h3.send_response(h3_conn, sid, 404, [])
     :quic_h3.send_data(h3_conn, sid, <<>>, true)
+  end
+
+  # `:quic_h3` buffers a non-CONNECT final response's HEADERS to coalesce them
+  # with the first body chunk, flushing only on the next `send_data`/trailers.
+  # Datagram routes keep the stream open and send no body, so without a flush the
+  # client never sees the response. An empty DATA frame with `fin: false` pushes
+  # the buffered HEADERS out while leaving the stream open for datagrams.
+  defp flush_response_headers(h3_conn, sid) do
+    :quic_h3.send_data(h3_conn, sid, <<>>, false)
   end
 
   defp owner_loop(state) do

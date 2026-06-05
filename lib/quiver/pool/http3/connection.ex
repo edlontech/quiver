@@ -188,19 +188,68 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
   # Tear down the current attempt and dial the next candidate. When none remain,
   # fail the queued callers and stop normally.
+  #
+  # Requests already opened on the dying connection (0-RTT early requests sent
+  # while still :connecting) would otherwise be stranded: their streams live on
+  # the now-dead connection and are never re-sent. Harvest their replay specs so
+  # they ride the next candidate (drained on :connected), or fail their callers
+  # when no candidate remains.
   defp retry_or_fail(data, reason) do
     cleanup_attempt(data)
-    data = %{data | h3_conn: nil, h3_conn_mon: nil, quic_conn: nil}
+    {data, harvested} = harvest_inflight_requests(data)
+
+    data = %{
+      data
+      | h3_conn: nil,
+        h3_conn_mon: nil,
+        quic_conn: nil,
+        replay_queue: data.replay_queue ++ harvested
+    }
 
     case start_connect_attempt(data) do
       {:connecting, data, actions} ->
         {:keep_state, data, actions}
 
       {:error, _} ->
+        err = QUICHandshakeFailed.exception(origin: data.origin, reason: reason)
         emit_exception(data.origin, reason, data.handshake_start)
-        fail_pending(data, QUICHandshakeFailed.exception(origin: data.origin, reason: reason))
+        fail_pending(data, err)
+        fail_replay_queue(data, err)
         {:stop, :normal, data}
     end
+  end
+
+  # During :connecting only early requests are tracked (regular requests open in
+  # :connected), and every early request carries a `:spec`. Reclaim those specs
+  # for replay and drop the defunct stream bookkeeping tied to the dead connection.
+  defp harvest_inflight_requests(data) do
+    specs =
+      data.requests
+      |> Map.values()
+      |> Enum.flat_map(fn req ->
+        case Map.get(req, :spec) do
+          nil -> []
+          spec -> [spec]
+        end
+      end)
+
+    Enum.each(data.requests, fn {ref, req} ->
+      Process.demonitor(req.monitor, [:flush])
+
+      case Map.get(data.stream_tasks, ref) do
+        nil -> :ok
+        pid -> kill_stream_task(pid)
+      end
+    end)
+
+    data = %{data | requests: %{}, monitors: %{}, stream_to_ref: %{}, stream_tasks: %{}}
+    {data, specs}
+  end
+
+  defp fail_replay_queue(data, err) do
+    Enum.each(data.replay_queue, fn {_method, _path, _headers, _body, from, _timeout} ->
+      GenStateMachine.reply(from, {:error, err})
+    end)
   end
 
   defp cleanup_attempt(%{h3_conn: nil}), do: :ok
@@ -979,10 +1028,18 @@ defmodule Quiver.Pool.HTTP3.Connection do
           {:keep_state, put_request(data, ref, push_streaming_chunk(data, req, ref, chunk))}
 
         :datagram_channel ->
-          send(req.channel_owner, {:quiver_h3_channel, req.channel_ref, {:stream_data, chunk}})
+          forward_channel_stream_data(req, chunk)
           :keep_state_and_data
       end
     end)
+  end
+
+  # Zero-length DATA frames carry no application data (RFC 9114 §4.1) and only
+  # appear as flush artifacts; never surface them as `:stream_data` events.
+  defp forward_channel_stream_data(_req, <<>>), do: :ok
+
+  defp forward_channel_stream_data(req, chunk) do
+    send(req.channel_owner, {:quiver_h3_channel, req.channel_ref, {:stream_data, chunk}})
   end
 
   defp handle_data_final(data, sid, chunk) do
@@ -1002,10 +1059,7 @@ defmodule Quiver.Pool.HTTP3.Connection do
   end
 
   defp finish_datagram_channel(data, ref, sid, req, chunk) do
-    if chunk != <<>> do
-      send(req.channel_owner, {:quiver_h3_channel, req.channel_ref, {:stream_data, chunk}})
-    end
-
+    forward_channel_stream_data(req, chunk)
     close_channel_owner(data, ref, sid, req, :peer)
   end
 

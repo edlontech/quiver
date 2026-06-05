@@ -113,7 +113,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
   defp capture_ticket(server, config, attempts) do
     {:ok, _w} =
       Connection.start_link(
-        origin: {:https, "localhost", server.port},
+        origin: {:https, "127.0.0.1", server.port},
         config: config,
         pool_pid: self()
       )
@@ -140,7 +140,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
 
     {:ok, worker} =
       Connection.start_link(
-        origin: {:https, "localhost", server.port},
+        origin: {:https, "127.0.0.1", server.port},
         config: config,
         pool_pid: self(),
         session_ticket: ticket
@@ -206,7 +206,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
 
     {:ok, worker} =
       Connection.start_link(
-        origin: {:https, "localhost", server.port},
+        origin: {:https, "127.0.0.1", server.port},
         config: config,
         pool_pid: self(),
         session_ticket: ticket
@@ -269,7 +269,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
 
       {:ok, worker} =
         Connection.start_link(
-          origin: {:https, "localhost", server.port},
+          origin: {:https, "127.0.0.1", server.port},
           config: [verify: :verify_none, cacerts: server.cacerts],
           pool_pid: self()
         )
@@ -277,7 +277,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
       conn = Connection.get_h3_conn(worker)
       send(worker, {:quic_h3, conn, {:session_ticket, :fake_ticket}})
 
-      assert_receive {:session_ticket, {:https, "localhost", _port}, :fake_ticket}, 2_000
+      assert_receive {:session_ticket, {:https, "127.0.0.1", _port}, :fake_ticket}, 2_000
 
       assert_receive {:tel, [:quiver, :connection, :http3, :ticket_received],
                       %{lifetime: _, max_early_data: _}, %{origin: _}},
@@ -298,10 +298,10 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
 
     test "caches forwarded session tickets newest-first", %{server: server, config: config} do
       {:ok, pool} =
-        HTTP3.start_link(origin: {:https, "localhost", server.port}, pool_opts: config)
+        HTTP3.start_link(origin: {:https, "127.0.0.1", server.port}, pool_opts: config)
 
-      send(pool, {:session_ticket, {:https, "localhost", server.port}, :ticket_a})
-      send(pool, {:session_ticket, {:https, "localhost", server.port}, :ticket_b})
+      send(pool, {:session_ticket, {:https, "127.0.0.1", server.port}, :ticket_a})
+      send(pool, {:session_ticket, {:https, "127.0.0.1", server.port}, :ticket_b})
 
       assert [{:ticket_b, _}, {:ticket_a, _}] = coordinator_data(pool).tickets
     end
@@ -311,10 +311,10 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
       config: config
     } do
       {:ok, pool} =
-        HTTP3.start_link(origin: {:https, "localhost", server.port}, pool_opts: config)
+        HTTP3.start_link(origin: {:https, "127.0.0.1", server.port}, pool_opts: config)
 
       for n <- 1..7,
-          do: send(pool, {:session_ticket, {:https, "localhost", server.port}, {:t, n}})
+          do: send(pool, {:session_ticket, {:https, "127.0.0.1", server.port}, {:t, n}})
 
       tickets = coordinator_data(pool).tickets
       assert length(tickets) == 5
@@ -337,7 +337,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
     test "early_capable is false when no ticket is supplied", %{server: server, config: config} do
       {:ok, worker} =
         Connection.start_link(
-          origin: {:https, "localhost", server.port},
+          origin: {:https, "127.0.0.1", server.port},
           config: config,
           pool_pid: self()
         )
@@ -358,7 +358,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
       # Second connection supplies the ticket and should derive early keys.
       {:ok, w2} =
         Connection.start_link(
-          origin: {:https, "localhost", server.port},
+          origin: {:https, "127.0.0.1", server.port},
           config: config,
           pool_pid: self(),
           session_ticket: ticket
@@ -389,7 +389,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
 
       {:ok, w2} =
         Connection.start_link(
-          origin: {:https, "localhost", server.port},
+          origin: {:https, "127.0.0.1", server.port},
           config: config,
           pool_pid: self(),
           session_ticket: ticket
@@ -424,7 +424,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
 
       {:ok, w2} =
         Connection.start_link(
-          origin: {:https, "localhost", server.port},
+          origin: {:https, "127.0.0.1", server.port},
           config: config,
           pool_pid: self(),
           session_ticket: ticket
@@ -456,7 +456,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
 
       {:ok, w2} =
         Connection.start_link(
-          origin: {:https, "localhost", server.port},
+          origin: {:https, "127.0.0.1", server.port},
           config: config,
           pool_pid: self(),
           session_ticket: ticket
@@ -483,9 +483,9 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
       enabled = Keyword.put(config, :early_data, true)
 
       {:ok, pool} =
-        HTTP3.start_link(origin: {:https, "localhost", server.port}, pool_opts: enabled)
+        HTTP3.start_link(origin: {:https, "127.0.0.1", server.port}, pool_opts: enabled)
 
-      send(pool, {:session_ticket, {:https, "localhost", server.port}, ticket})
+      send(pool, {:session_ticket, {:https, "127.0.0.1", server.port}, ticket})
 
       assert {:ok, %Quiver.Response{status: 200, body: "ok"}} =
                HTTP3.request(pool, :get, "/", [], nil, receive_timeout: 5_000)
@@ -515,7 +515,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
 
       {:ok, w2} =
         Connection.start_link(
-          origin: {:https, "localhost", server.port},
+          origin: {:https, "127.0.0.1", server.port},
           config: config,
           pool_pid: self(),
           session_ticket: ticket
@@ -536,9 +536,9 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
       enabled = Keyword.put(config, :early_data, true)
 
       {:ok, pool} =
-        HTTP3.start_link(origin: {:https, "localhost", server.port}, pool_opts: enabled)
+        HTTP3.start_link(origin: {:https, "127.0.0.1", server.port}, pool_opts: enabled)
 
-      send(pool, {:session_ticket, {:https, "localhost", server.port}, ticket})
+      send(pool, {:session_ticket, {:https, "127.0.0.1", server.port}, ticket})
 
       assert {:ok, %Quiver.Response{status: 200}} =
                HTTP3.request(pool, :post, "/echo", [], "x", receive_timeout: 5_000)
@@ -633,7 +633,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
         {Quiver.Supervisor,
          name: name,
          pools: %{
-           "https://localhost:#{server.port}" => [
+           "https://127.0.0.1:#{server.port}" => [
              protocol: :http3,
              early_data: true,
              verify: :verify_none,
@@ -643,12 +643,12 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
       )
 
       {:ok, %{status: 200}} =
-        Quiver.new(:get, "https://localhost:#{server.port}/") |> Quiver.request(name: name)
+        Quiver.new(:get, "https://127.0.0.1:#{server.port}/") |> Quiver.request(name: name)
 
       assert_receive {:server_headers, _}, 5_000
 
       assert {:ok, %{status: 200}} =
-               Quiver.new(:get, "https://localhost:#{server.port}/")
+               Quiver.new(:get, "https://127.0.0.1:#{server.port}/")
                |> Quiver.request(name: name, early_data: false)
     end
   end
@@ -672,7 +672,7 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
     test "request 1 caches a ticket; request 2 opens a resuming connection that derives early keys",
          %{server: server, config: config} do
       {:ok, pool} =
-        HTTP3.start_link(origin: {:https, "localhost", server.port}, pool_opts: config)
+        HTTP3.start_link(origin: {:https, "127.0.0.1", server.port}, pool_opts: config)
 
       # Request(s) on fresh connections until the coordinator caches a ticket
       # (the in-process server issues NewSessionTicket non-deterministically).
@@ -711,9 +711,9 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
 
     test "does not pop a ticket when early_data is disabled", %{server: server, config: config} do
       {:ok, pool} =
-        HTTP3.start_link(origin: {:https, "localhost", server.port}, pool_opts: config)
+        HTTP3.start_link(origin: {:https, "127.0.0.1", server.port}, pool_opts: config)
 
-      send(pool, {:session_ticket, {:https, "localhost", server.port}, :ticket_a})
+      send(pool, {:session_ticket, {:https, "127.0.0.1", server.port}, :ticket_a})
 
       {:ok, _} = HTTP3.request(pool, :get, "/", [], nil, receive_timeout: 5_000)
 
@@ -733,9 +733,9 @@ defmodule Quiver.Pool.HTTP3EarlyDataTest do
       enabled = Keyword.put(config, :early_data, true)
 
       {:ok, pool} =
-        HTTP3.start_link(origin: {:https, "localhost", server.port}, pool_opts: enabled)
+        HTTP3.start_link(origin: {:https, "127.0.0.1", server.port}, pool_opts: enabled)
 
-      send(pool, {:session_ticket, {:https, "localhost", server.port}, ticket})
+      send(pool, {:session_ticket, {:https, "127.0.0.1", server.port}, ticket})
 
       # Force the first connection to start by issuing a request; popping the
       # seeded ticket is the observable post-condition.

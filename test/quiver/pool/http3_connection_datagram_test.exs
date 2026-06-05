@@ -14,6 +14,10 @@ defmodule Quiver.Pool.HTTP3.Connection.DatagramTest do
 
     handler = fn h3_conn, sid, _method, "/echo", _headers ->
       :quic_h3.send_response(h3_conn, sid, 200, [])
+      # `:quic_h3` buffers a non-CONNECT final response's HEADERS until the next
+      # body chunk; flush them with an empty non-final DATA frame so the kept-open
+      # datagram stream's response reaches the client.
+      :quic_h3.send_data(h3_conn, sid, <<>>, false)
       send(test_pid, {:server_ready, h3_conn, sid})
       :ok
     end
