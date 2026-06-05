@@ -6,6 +6,21 @@
 
 * HTTP/3 support over QUIC via `:quic_h3`. New `protocol: :http3` pool option with `quic_opts` and `h3_settings` knobs. Includes coordinator + per-connection workers, buffered and streaming requests/responses, request body streaming, GOAWAY-driven drain, and connection-level telemetry under `[:quiver, :connection, :http3, ...]`. See `guides/http3.md` for usage, configuration, and known limitations.
 
+## [0.4.0](https://github.com/edlontech/quiver/compare/v0.3.0...v0.4.0) (2026-06-05)
+
+
+### Features
+
+* **http3:** add 0-RTT early data support (RFC 8470) ([ad4aa1c](https://github.com/edlontech/quiver/commit/ad4aa1cdc8763f1c046397a075a4d5896c8ed2ef))
+
+
+### Bug Fixes
+
+* Fixes QUIC concurrency ([6eadca6](https://github.com/edlontech/quiver/commit/6eadca6d3f4ebb8cf1df387929e4051ecbf9bd90))
+* **http/2/3:** Improved pool management ([170944c](https://github.com/edlontech/quiver/commit/170944cec6aaf33c40e4f74ac8d21b6fc1252e82))
+* **http3:** repair failing and slow datagram and early-data integration tests ([ca7e59f](https://github.com/edlontech/quiver/commit/ca7e59f16ca71bbcd0ea9f008960f285824383b7))
+* Update QUIC ([8c466fd](https://github.com/edlontech/quiver/commit/8c466fd7db53e734ff2e307c188a60badda662fa))
+
 ## [0.3.0](https://github.com/edlontech/quiver/compare/v0.2.1...v0.3.0) (2026-05-21)
 
 
