@@ -10,6 +10,8 @@ defmodule Quiver.SmokeCase do
   """
   use ExUnit.CaseTemplate
 
+  alias Quiver.Conn.HTTP3
+
   @h3_port 4435
   @probe_key {__MODULE__, :probe_result}
 
@@ -100,11 +102,15 @@ defmodule Quiver.SmokeCase do
   end
 
   defp probe(timeout, attempts_left) do
-    opts = %{verify: :verify_none, sync: true, connect_timeout: timeout}
+    # Probe through Quiver.Conn.HTTP3 so the reachability check uses the same
+    # direct-path resolution + v6->v4 fallback as the pool worker, instead of calling
+    # :quic_h3 directly (which on "localhost" hits the Happy-Eyeballs race that drops
+    # the server's SETTINGS streams and stalls the handshake).
+    uri = %URI{scheme: "https", host: "localhost", port: @h3_port}
 
-    case :quic_h3.connect(~c"localhost", @h3_port, opts) do
+    case HTTP3.connect(uri, verify: :verify_none, connect_timeout: timeout) do
       {:ok, conn} ->
-        _ = :quic_h3.close(conn)
+        _ = HTTP3.close(conn)
         :ok
 
       {:error, reason} when attempts_left <= 1 ->

@@ -13,7 +13,7 @@ defmodule Quiver.Conn.HTTP3 do
 
   @behaviour Quiver.Conn
 
-  @dialyzer {:nowarn_function, connect: 2, query_peer_max_streams: 2}
+  @dialyzer {:nowarn_function, connect: 2, do_connect: 5, query_peer_max_streams: 2}
 
   alias Quiver.Error.H3StreamError
   alias Quiver.Error.QUICHandshakeFailed
@@ -21,6 +21,11 @@ defmodule Quiver.Conn.HTTP3 do
   alias Quiver.Response
 
   @forbidden_headers ~w(connection keep-alive transfer-encoding upgrade proxy-connection)
+
+  # Probe budget for a non-final connect candidate, so an unreachable preferred
+  # address fails over to the next family without burning the full connect timeout.
+  # Shared with `Quiver.Pool.HTTP3.Connection` via `connect_probe_timeout/0`.
+  @connect_probe_timeout 1_500
 
   defstruct [
     :h3_conn,
@@ -54,11 +59,10 @@ defmodule Quiver.Conn.HTTP3 do
 
     h3_opts =
       opts
-      |> build_h3_opts()
+      |> build_h3_opts(host)
       |> Map.put(:sync, true)
-      |> Map.put(:connect_timeout, timeout)
 
-    case :quic_h3.connect(host, port, h3_opts) do
+    case do_connect(resolve_candidates(host), port, h3_opts, timeout, :nxdomain) do
       {:ok, h3_conn} ->
         {:ok,
          %__MODULE__{
@@ -86,6 +90,21 @@ defmodule Quiver.Conn.HTTP3 do
        origin: {scheme |> to_string() |> String.to_atom(), uri.host, uri.port},
        reason: {:invalid_scheme, scheme}
      )}
+  end
+
+  # Dial resolved candidate addresses in turn (IPv6 first), forcing the QUIC direct
+  # path. Non-final candidates get the short probe budget so an unreachable preferred
+  # family fails over quickly; the final candidate gets the full connect timeout.
+  defp do_connect([], _port, _h3_opts, _timeout, last_error), do: {:error, last_error}
+
+  defp do_connect([ip | rest], port, h3_opts, timeout, _last_error) do
+    attempt_timeout = if rest == [], do: timeout, else: min(timeout, @connect_probe_timeout)
+    h3_opts = Map.put(h3_opts, :connect_timeout, attempt_timeout)
+
+    case :quic_h3.connect(ip, port, h3_opts) do
+      {:ok, h3_conn} -> {:ok, h3_conn}
+      {:error, reason} -> do_connect(rest, port, h3_opts, timeout, reason)
+    end
   end
 
   @impl Quiver.Conn
@@ -239,15 +258,55 @@ defmodule Quiver.Conn.HTTP3 do
     end
   end
 
-  defp build_h3_opts(opts) do
+  @doc false
+  @spec connect_probe_timeout() :: pos_integer()
+  def connect_probe_timeout, do: @connect_probe_timeout
+
+  @doc """
+  Resolves a host to at most one address per family, IPv6 first (RFC 8305 §4
+  preference), for the direct-connect path. A literal IP is returned as-is.
+  Shared with `Quiver.Pool.HTTP3.Connection`.
+  """
+  @spec resolve_candidates(String.t()) :: [:inet.ip_address()]
+  def resolve_candidates(host) do
+    hostc = to_charlist(host)
+
+    case :inet.parse_address(hostc) do
+      {:ok, ip} -> [ip]
+      {:error, _} -> first_addr(hostc, :inet6) ++ first_addr(hostc, :inet)
+    end
+  end
+
+  defp first_addr(hostc, family) do
+    case :inet.getaddrs(hostc, family) do
+      {:ok, [ip | _]} -> [ip]
+      _ -> []
+    end
+  end
+
+  defp build_h3_opts(opts, host) do
     base = %{verify: Keyword.get(opts, :verify, :verify_peer)}
 
     base
     |> maybe_put(:cacerts, Keyword.get(opts, :cacerts))
     |> maybe_put(:settings, Keyword.get(opts, :h3_settings))
-    |> maybe_put(:quic_opts, Keyword.get(opts, :quic_opts))
+    |> Map.put(:quic_opts, build_quic_opts(Keyword.get(opts, :quic_opts), host))
     |> maybe_put_datagram(Keyword.get(opts, :h3_datagram_enabled, true))
   end
+
+  # Disable Happy-Eyeballs and dial the resolved literal address: the QUIC race
+  # coordinator transfers connection ownership only after the handshake completes,
+  # dropping the server's SETTINGS streams. `server_name` carries the hostname for
+  # SNI / `verify_peer` since the dialed host is an IP. See `do_connect/5`.
+  defp build_quic_opts(quic_opts, host) do
+    quic_opts
+    |> normalize_quic_opts()
+    |> Map.put(:happy_eyeballs, false)
+    |> Map.put(:server_name, to_string(host))
+  end
+
+  defp normalize_quic_opts(opts) when is_map(opts), do: opts
+  defp normalize_quic_opts(_), do: %{}
 
   defp maybe_put(map, _k, nil), do: map
   defp maybe_put(map, _k, :default), do: map

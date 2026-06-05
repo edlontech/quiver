@@ -25,7 +25,14 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
   use GenStateMachine, callback_mode: [:state_functions, :state_enter]
 
-  @dialyzer {:nowarn_function, [init: 1, early_keys?: 1, emit_early_outcome: 1]}
+  @dialyzer {:nowarn_function,
+             [
+               init: 1,
+               start_connect_attempt: 1,
+               cleanup_attempt: 1,
+               early_keys?: 1,
+               emit_early_outcome: 1
+             ]}
 
   alias Quiver.Conn.HTTP3, as: ConnHTTP3
   alias Quiver.Error.H3GoAway
@@ -40,13 +47,17 @@ defmodule Quiver.Pool.HTTP3.Connection do
   defstruct [
     :h3_conn,
     :h3_conn_mon,
+    :quic_conn,
     :origin,
     :config,
     :pool_pid,
     :handshake_start,
+    :connect_h3_opts,
+    :session_ticket,
     goaway_id: nil,
     peer_max_streams: 100,
     stream_idle_timeout: 30_000,
+    connect_candidates: [],
     requests: %{},
     monitors: %{},
     stream_to_ref: %{},
@@ -63,13 +74,17 @@ defmodule Quiver.Pool.HTTP3.Connection do
   @type t :: %__MODULE__{
           h3_conn: pid() | nil,
           h3_conn_mon: reference() | nil,
+          quic_conn: pid() | nil,
           origin: origin(),
           config: keyword(),
           pool_pid: pid() | nil,
           handshake_start: integer() | nil,
+          connect_h3_opts: map() | nil,
+          session_ticket: binary() | nil,
           goaway_id: non_neg_integer() | nil,
           peer_max_streams: non_neg_integer(),
           stream_idle_timeout: non_neg_integer(),
+          connect_candidates: [:inet.ip_address()],
           requests: map(),
           monitors: map(),
           stream_to_ref: map(),
@@ -104,38 +119,99 @@ defmodule Quiver.Pool.HTTP3.Connection do
 
   @impl true
   def init(opts) do
-    {scheme, host, port} = origin = Keyword.fetch!(opts, :origin)
+    {_scheme, host, _port} = origin = Keyword.fetch!(opts, :origin)
     config = Keyword.get(opts, :config, [])
     pool_pid = Keyword.get(opts, :pool_pid)
-
     ticket = Keyword.get(opts, :session_ticket)
-    h3_opts = build_h3_opts(config, ticket)
+
     handshake_start = System.monotonic_time()
     emit_start(origin, pool_pid)
 
-    case :quic_h3.connect(host, port, h3_opts) do
-      {:ok, h3_conn} ->
-        mon = Process.monitor(h3_conn)
+    candidates =
+      Keyword.get_lazy(opts, :connect_candidates, fn -> ConnHTTP3.resolve_candidates(host) end)
 
-        data = %__MODULE__{
-          h3_conn: h3_conn,
-          h3_conn_mon: mon,
-          origin: {scheme, host, port},
-          config: config,
-          pool_pid: pool_pid,
-          handshake_start: handshake_start,
-          stream_idle_timeout:
-            Keyword.get(config, :stream_idle_timeout, @default_stream_idle_timeout),
-          early_capable: ticket != nil and early_keys?(h3_conn)
-        }
+    data = %__MODULE__{
+      origin: origin,
+      config: config,
+      pool_pid: pool_pid,
+      handshake_start: handshake_start,
+      stream_idle_timeout:
+        Keyword.get(config, :stream_idle_timeout, @default_stream_idle_timeout),
+      session_ticket: ticket,
+      connect_h3_opts: build_h3_opts(config, ticket, host),
+      connect_candidates: candidates
+    }
 
-        {:ok, :connecting, data}
+    case start_connect_attempt(data) do
+      {:connecting, data, actions} ->
+        {:ok, :connecting, data, actions}
 
       {:error, reason} ->
         emit_exception(origin, reason, handshake_start)
         {:stop, QUICHandshakeFailed.exception(origin: origin, reason: reason)}
     end
   end
+
+  # Dial the next candidate. Returns `{:connecting, data, actions}` on a started
+  # attempt (with the per-attempt connect timeout armed) or `{:error, reason}` once
+  # every candidate has been exhausted.
+  defp start_connect_attempt(%{connect_candidates: []}), do: {:error, :nxdomain}
+
+  defp start_connect_attempt(%{connect_candidates: [ip | rest]} = data) do
+    {_scheme, _host, port} = data.origin
+
+    case :quic_h3.connect(ip, port, data.connect_h3_opts) do
+      {:ok, h3_conn} ->
+        mon = Process.monitor(h3_conn)
+
+        data = %{
+          data
+          | h3_conn: h3_conn,
+            h3_conn_mon: mon,
+            quic_conn: :quic_h3.get_quic_conn(h3_conn),
+            connect_candidates: rest,
+            early_capable: data.session_ticket != nil and early_keys?(h3_conn)
+        }
+
+        {:connecting, data,
+         [{:state_timeout, attempt_timeout(data.config, rest), :connect_timeout}]}
+
+      {:error, _reason} ->
+        start_connect_attempt(%{data | connect_candidates: rest})
+    end
+  end
+
+  defp attempt_timeout(config, [] = _remaining), do: connect_timeout(config)
+
+  defp attempt_timeout(config, _remaining),
+    do: min(connect_timeout(config), ConnHTTP3.connect_probe_timeout())
+
+  # Tear down the current attempt and dial the next candidate. When none remain,
+  # fail the queued callers and stop normally.
+  defp retry_or_fail(data, reason) do
+    cleanup_attempt(data)
+    data = %{data | h3_conn: nil, h3_conn_mon: nil, quic_conn: nil}
+
+    case start_connect_attempt(data) do
+      {:connecting, data, actions} ->
+        {:keep_state, data, actions}
+
+      {:error, _} ->
+        emit_exception(data.origin, reason, data.handshake_start)
+        fail_pending(data, QUICHandshakeFailed.exception(origin: data.origin, reason: reason))
+        {:stop, :normal, data}
+    end
+  end
+
+  defp cleanup_attempt(%{h3_conn: nil}), do: :ok
+
+  defp cleanup_attempt(%{h3_conn: h3_conn, h3_conn_mon: mon}) do
+    if mon, do: Process.demonitor(mon, [:flush])
+    _ = :quic_h3.close(h3_conn)
+    :ok
+  end
+
+  defp connect_timeout(config), do: Keyword.get(config, :connect_timeout, 5_000)
 
   defp emit_start(origin, pool_pid) do
     :telemetry.execute(
@@ -173,7 +249,7 @@ defmodule Quiver.Pool.HTTP3.Connection do
     )
   end
 
-  defp build_h3_opts(config, ticket) do
+  defp build_h3_opts(config, ticket, host) do
     base = %{
       sync: false,
       alpn: [<<"h3">>],
@@ -183,16 +259,30 @@ defmodule Quiver.Pool.HTTP3.Connection do
     base
     |> maybe_put(:cacerts, Keyword.get(config, :cacerts))
     |> maybe_put(:settings, Keyword.get(config, :h3_settings))
-    |> maybe_put(:quic_opts, quic_opts_with_ticket(Keyword.get(config, :quic_opts), ticket))
+    |> Map.put(:quic_opts, build_quic_opts(config, ticket, host))
     |> maybe_put_datagram(Keyword.get(config, :h3_datagram_enabled, true))
   end
 
-  defp quic_opts_with_ticket(quic_opts, nil), do: quic_opts
-  defp quic_opts_with_ticket(nil, ticket), do: %{session_ticket: ticket}
-  defp quic_opts_with_ticket(:default, ticket), do: %{session_ticket: ticket}
+  # We resolve the origin and dial a single literal address ourselves (see
+  # `resolve_candidates/1`), so Happy-Eyeballs is disabled in the QUIC layer: its
+  # race coordinator hands the connection to the H3 process only after the handshake
+  # completes, which drops the server's control/QPACK (SETTINGS) streams and strands
+  # the handshake in `h3_connecting`. `server_name` carries the real hostname for SNI
+  # and `verify_peer` since the dialed host is a literal IP.
+  defp build_quic_opts(config, ticket, host) do
+    config
+    |> Keyword.get(:quic_opts)
+    |> normalize_quic_opts()
+    |> Map.put(:happy_eyeballs, false)
+    |> Map.put(:server_name, to_string(host))
+    |> maybe_put_ticket(ticket)
+  end
 
-  defp quic_opts_with_ticket(quic_opts, ticket) when is_map(quic_opts),
-    do: Map.put(quic_opts, :session_ticket, ticket)
+  defp normalize_quic_opts(opts) when is_map(opts), do: opts
+  defp normalize_quic_opts(_), do: %{}
+
+  defp maybe_put_ticket(opts, nil), do: opts
+  defp maybe_put_ticket(opts, ticket), do: Map.put(opts, :session_ticket, ticket)
 
   defp early_keys?(h3_conn) do
     :quic.has_early_keys(:quic_h3.get_quic_conn(h3_conn))
@@ -219,21 +309,16 @@ defmodule Quiver.Pool.HTTP3.Connection do
     {:next_state, :connected, data}
   end
 
+  def connecting(:state_timeout, :connect_timeout, data) do
+    retry_or_fail(data, :connect_timeout)
+  end
+
   def connecting(:info, {:quic_h3, h3_conn, :closed}, %{h3_conn: h3_conn} = data) do
-    emit_exception(data.origin, :closed, data.handshake_start)
-    fail_pending(data, QUICHandshakeFailed.exception(origin: data.origin, reason: :closed))
-    {:stop, :normal, data}
+    retry_or_fail(data, :closed)
   end
 
   def connecting(:info, {:quic_h3, h3_conn, {:error, code, reason}}, %{h3_conn: h3_conn} = data) do
-    emit_exception(data.origin, {:error, code, reason}, data.handshake_start)
-
-    fail_pending(
-      data,
-      QUICHandshakeFailed.exception(origin: data.origin, reason: {:error, code, reason})
-    )
-
-    {:stop, :shutdown, data}
+    retry_or_fail(data, {:error, code, reason})
   end
 
   def connecting({:call, from}, :max_streams, _data) do
@@ -270,9 +355,7 @@ defmodule Quiver.Pool.HTTP3.Connection do
   end
 
   def connecting(:info, {:DOWN, mon, :process, _, reason}, %{h3_conn_mon: mon} = data) do
-    emit_exception(data.origin, reason, data.handshake_start)
-    fail_pending(data, QUICHandshakeFailed.exception(origin: data.origin, reason: reason))
-    {:stop, :shutdown, data}
+    retry_or_fail(data, reason)
   end
 
   def connecting(
@@ -291,6 +374,16 @@ defmodule Quiver.Pool.HTTP3.Connection do
         %{h3_conn: h3_conn} = data
       ) do
     {:keep_state, handle_early_data_rejected(data, sids)}
+  end
+
+  # Safety net for the QUIC owner-transfer race: raw QUIC events that landed in our
+  # mailbox during the brief window before the H3 process became the connection owner
+  # (e.g. the server's control/QPACK SETTINGS streams) are forwarded on so the
+  # handshake converges instead of stalling in `h3_connecting`.
+  def connecting(:info, {:quic, quic_conn, _} = msg, %{quic_conn: quic_conn, h3_conn: h3_conn})
+      when is_pid(h3_conn) do
+    send(h3_conn, msg)
+    :keep_state_and_data
   end
 
   def connecting(:info, {:quic_h3, _, _}, _data), do: :keep_state_and_data
