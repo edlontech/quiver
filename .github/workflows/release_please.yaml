@@ -12,10 +12,6 @@ name: Release Flow
 
 jobs:
   release-please:
-    strategy:
-      matrix:
-        elixir: ["1.19.4"]
-        otp: ["28.3"]
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -38,8 +34,8 @@ jobs:
     if: ${{ needs.release-please.outputs.release_created }}
     strategy:
       matrix:
-        elixir: ["1.19.4"]
-        otp: ["28.3"]
+        elixir: ["1.20.2"]
+        otp: ["29.0.3"]
         bench:
           - concurrency
           - payload

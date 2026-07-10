@@ -80,7 +80,7 @@ defmodule Quiver.Conn.HTTP1.Parse do
   end
 
   def parse(data, {:body_content_length, remaining}) when byte_size(data) >= remaining do
-    <<body::binary-size(remaining), rest::binary>> = data
+    <<body::binary-size(^remaining), rest::binary>> = data
     {[{:data, body}, :done], :idle, rest}
   end
 
@@ -102,7 +102,7 @@ defmodule Quiver.Conn.HTTP1.Parse do
 
   def parse(data, {:body_chunked, {:chunk_data, remaining}})
       when byte_size(data) >= remaining do
-    <<chunk::binary-size(remaining), rest::binary>> = data
+    <<chunk::binary-size(^remaining), rest::binary>> = data
 
     case rest do
       <<"\r\n", rest::binary>> ->

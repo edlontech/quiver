@@ -281,7 +281,7 @@ defmodule Quiver.Conn.HTTP2.Frame do
     data_length = byte_size(rest) - pad_length
 
     if data_length >= 0 do
-      <<data::binary-size(data_length), _padding::binary>> = rest
+      <<data::binary-size(^data_length), _padding::binary>> = rest
       {:ok, data}
     else
       {:error, :protocol_error}

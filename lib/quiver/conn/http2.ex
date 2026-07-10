@@ -462,7 +462,7 @@ defmodule Quiver.Conn.HTTP2 do
         {:ok, conn, stream.ref, [header_frame | data_frames]}
 
       allowed > 0 ->
-        <<chunk::binary-size(allowed), rest::binary>> = body_binary
+        <<chunk::binary-size(^allowed), rest::binary>> = body_binary
         data_frames = split_data_frames_no_end(stream_id, chunk, max_frame)
         stream = %{stream | pending_send: rest, send_window: stream.send_window - allowed}
 
@@ -548,7 +548,7 @@ defmodule Quiver.Conn.HTTP2 do
         {:ok, conn, data_frames}
 
       allowed > 0 ->
-        <<sent::binary-size(allowed), rest::binary>> = body_binary
+        <<sent::binary-size(^allowed), rest::binary>> = body_binary
         data_frames = split_data_frames_no_end(stream_id, sent, max_frame)
         stream = %{stream | pending_send: rest, send_window: stream.send_window - allowed}
 
@@ -991,7 +991,7 @@ defmodule Quiver.Conn.HTTP2 do
         {conn, frames}
 
       allowed > 0 ->
-        <<chunk::binary-size(allowed), rest::binary>> = body
+        <<chunk::binary-size(^allowed), rest::binary>> = body
         frames = split_data_frames_no_end(stream_id, chunk, max_frame)
         stream = %{stream | pending_send: rest, send_window: stream.send_window - allowed}
 
@@ -1204,7 +1204,7 @@ defmodule Quiver.Conn.HTTP2 do
   end
 
   defp do_split_data_frames(stream_id, body, max_size, end_stream, acc) do
-    <<chunk::binary-size(max_size), rest::binary>> = body
+    <<chunk::binary-size(^max_size), rest::binary>> = body
     frame = Frame.encode_data_sized(stream_id, chunk, max_size, false)
     do_split_data_frames(stream_id, rest, max_size, end_stream, [frame | acc])
   end

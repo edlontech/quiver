@@ -158,7 +158,6 @@ defmodule Quiver.MixProject do
       {:splode, "~> 0.2"},
       {:telemetry, "~> 1.0"},
       {:tesla, "~> 1.16", optional: true},
-      {:testcontainers, "~> 1.13", only: [:test, :dev]},
       {:tidewave, "~> 0.5", only: :dev, runtime: false},
       {:quic, "~> 1.6"},
       {:zoi, "~> 0.11"}
