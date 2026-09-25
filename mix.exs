@@ -159,7 +159,7 @@ defmodule Quiver.MixProject do
       {:telemetry, "~> 1.0"},
       {:tesla, "~> 1.16", optional: true},
       {:tidewave, "~> 0.5", only: :dev, runtime: false},
-      {:quic, "~> 1.6"},
+      {:quic, "~> 2.0"},
       {:zoi, "~> 0.11"}
     ]
   end
