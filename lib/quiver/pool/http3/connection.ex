@@ -15,8 +15,9 @@ defmodule Quiver.Pool.HTTP3.Connection do
   `{:quic_h3, _, {:goaway_sent, GoawayId}}` event. While draining, in-flight
   requests with `stream_id < goaway_id` continue to completion; everything
   else fails with `Quiver.Error.H3GoAway`. New `:forward_request` /
-  `:forward_stream` messages are refused. The worker stops `:normal` when
-  no requests remain.
+  `:forward_stream` messages are refused. The worker stops `:normal` on the
+  first drain-idle tick (every 100ms) that finds no requests left, so
+  forwards racing the drain are still rejected instead of lost.
 
   Note: request body streaming uses `{:stream_chunk, sid, chunk}` and
   `{:stream_end, sid}` info messages, whereas the HTTP/2 sibling uses
@@ -480,7 +481,7 @@ defmodule Quiver.Pool.HTTP3.Connection do
     open_channel_request(data, from, method, path, headers, channel_opts)
   end
 
-  def connected(:info, msg, data), do: dispatch_runtime(:connected, msg, data)
+  def connected(:info, msg, data), do: dispatch_runtime(msg, data)
 
   # -- :draining state --
 
@@ -527,14 +528,14 @@ defmodule Quiver.Pool.HTTP3.Connection do
     :keep_state_and_data
   end
 
-  def draining(:info, msg, data), do: dispatch_runtime(:draining, msg, data)
+  def draining(:info, msg, data), do: dispatch_runtime(msg, data)
 
   # -- shared runtime dispatch --
 
-  defp dispatch_runtime(state, msg, data) do
+  defp dispatch_runtime(msg, data) do
     case dispatch_event(msg, data) do
       :unhandled -> :keep_state_and_data
-      result -> maybe_finalize_draining(state, result, data)
+      result -> result
     end
   end
 
@@ -644,24 +645,6 @@ defmodule Quiver.Pool.HTTP3.Connection do
   end
 
   defp dispatch_event(_other, _data), do: :unhandled
-
-  defp maybe_finalize_draining(:draining, {:keep_state, data}, _prev) do
-    if map_size(data.requests) == 0 and data.goaway_id != nil do
-      {:stop, :normal, data}
-    else
-      {:keep_state, data}
-    end
-  end
-
-  defp maybe_finalize_draining(:draining, :keep_state_and_data, prev) do
-    if map_size(prev.requests) == 0 and prev.goaway_id != nil do
-      {:stop, :normal, prev}
-    else
-      :keep_state_and_data
-    end
-  end
-
-  defp maybe_finalize_draining(_state, result, _prev), do: result
 
   defp deliver_datagram(
          %{mode: :datagram_channel, channel_owner: pid, channel_ref: cref, stream_id: sid},
