@@ -6,6 +6,13 @@
 
 * HTTP/3 support over QUIC via `:quic_h3`. New `protocol: :http3` pool option with `quic_opts` and `h3_settings` knobs. Includes coordinator + per-connection workers, buffered and streaming requests/responses, request body streaming, GOAWAY-driven drain, and connection-level telemetry under `[:quiver, :connection, :http3, ...]`. See `guides/http3.md` for usage, configuration, and known limitations.
 
+## [0.4.3](https://github.com/edlontech/quiver/compare/v0.4.2...v0.4.3) (2026-11-13)
+
+
+### Bug Fixes
+
+* Fixed draining ([5442d54](https://github.com/edlontech/quiver/commit/5442d54192678f12c7d73681afc3fc24fe7797c6))
+
 ## [0.4.2](https://github.com/edlontech/quiver/compare/v0.4.1...v0.4.2) (2026-09-25)
 
 
