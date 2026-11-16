@@ -6,7 +6,7 @@ defmodule Quiver.MixProject do
       app: :quiver,
       description: description(),
       package: package(),
-      version: "0.4.2",
+      version: "0.4.3",
       elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       docs: docs(),
