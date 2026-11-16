@@ -38,7 +38,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
           write_queue: [iodata()]
         }
 
-  @stream_idle_timeout 30_000
+  @default_stream_idle_timeout 30_000
 
   @doc false
   def child_spec(opts) do
@@ -271,13 +271,16 @@ defmodule Quiver.Pool.HTTP2.Connection do
     end
   end
 
-  def connected(:info, {:forward_stream, from, method, path, headers, body, _timeout}, data) do
+  def connected(:info, {:forward_stream, from, method, path, headers, body, timeout}, data) do
     {caller_pid, _tag} = from
 
     case H2.prepare_request(data.conn, method, path, headers, body) do
       {:ok, conn, ref, frames} ->
         mon = Process.monitor(caller_pid)
 
+        # `consumer` is the last process to demand a chunk (initially the
+        # caller). Stream errors go there even when no demand is pending, so
+        # its next receive raises instead of waiting forever.
         request = %{
           from: from,
           caller_pid: caller_pid,
@@ -289,6 +292,8 @@ defmodule Quiver.Pool.HTTP2.Connection do
           trailers: [],
           pending_data: :queue.new(),
           demand_pid: nil,
+          consumer: caller_pid,
+          idle_timeout: timeout || @default_stream_idle_timeout,
           idle_timer: nil
         }
 
@@ -333,9 +338,9 @@ defmodule Quiver.Pool.HTTP2.Connection do
       {nil, _} ->
         :keep_state_and_data
 
-      {%{mode: :streaming, demand_pid: demand_pid, monitor: mon}, requests} ->
+      {%{mode: :streaming, consumer: consumer, monitor: mon}, requests} ->
         Process.demonitor(mon, [:flush])
-        if demand_pid, do: send(demand_pid, {:error, ref, :idle_timeout})
+        send(consumer, {:error, ref, :idle_timeout})
         conn_result = H2.cancel(data.conn, ref)
         conn = elem(conn_result, 1)
         monitors = Map.delete(data.monitors, mon)
@@ -474,9 +479,9 @@ defmodule Quiver.Pool.HTTP2.Connection do
       {nil, _} ->
         maybe_stop_draining(data, :draining)
 
-      {%{mode: :streaming, demand_pid: demand_pid, monitor: mon}, requests} ->
+      {%{mode: :streaming, consumer: consumer, monitor: mon}, requests} ->
         Process.demonitor(mon, [:flush])
-        if demand_pid, do: send(demand_pid, {:error, ref, :idle_timeout})
+        send(consumer, {:error, ref, :idle_timeout})
         conn_result = H2.cancel(data.conn, ref)
         conn = elem(conn_result, 1)
         monitors = Map.delete(data.monitors, mon)
@@ -597,7 +602,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
       {%{mode: :streaming} = req, requests} ->
         Process.demonitor(req.monitor, [:flush])
         cancel_idle_timer(req)
-        if req.demand_pid, do: send(req.demand_pid, {:error, ref, reason})
+        send(req.consumer, {:error, ref, reason})
         if data.pool_pid, do: send(data.pool_pid, {:stream_done, self()})
         %{data | requests: requests, monitors: Map.delete(data.monitors, req.monitor)}
 
@@ -657,7 +662,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
       req
       | headers: req.headers ++ value,
         phase: :body,
-        idle_timer: schedule_idle_timeout(ref)
+        idle_timer: schedule_idle_timeout(req, ref)
     }
 
     GenStateMachine.reply(req.from, {:ok, req.status, req.headers, ref, self()})
@@ -671,7 +676,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
   defp dispatch_streaming_body_phase(data, ref, req, :data, value) do
     if req.demand_pid != nil do
       send(req.demand_pid, {:chunk, ref, value})
-      timer = reschedule_idle_timeout(req.idle_timer, ref)
+      timer = reschedule_idle_timeout(req, ref)
       put_in(data.requests[ref], %{req | demand_pid: nil, idle_timer: timer})
     else
       put_in(data.requests[ref], %{req | pending_data: :queue.in(value, req.pending_data)})
@@ -733,15 +738,14 @@ defmodule Quiver.Pool.HTTP2.Connection do
     case :queue.out(req.pending_data) do
       {{:value, chunk}, rest} ->
         send(consumer_pid, {:chunk, ref, chunk})
-        timer = reschedule_idle_timeout(req.idle_timer, ref)
-
-        {:keep_state, put_in(data.requests[ref], %{req | pending_data: rest, idle_timer: timer})}
+        timer = reschedule_idle_timeout(req, ref)
+        req = %{req | pending_data: rest, consumer: consumer_pid, idle_timer: timer}
+        {:keep_state, put_in(data.requests[ref], req)}
 
       {:empty, _} ->
-        timer = reschedule_idle_timeout(req.idle_timer, ref)
-
-        {:keep_state,
-         put_in(data.requests[ref], %{req | demand_pid: consumer_pid, idle_timer: timer})}
+        timer = reschedule_idle_timeout(req, ref)
+        req = %{req | demand_pid: consumer_pid, consumer: consumer_pid, idle_timer: timer}
+        {:keep_state, put_in(data.requests[ref], req)}
     end
   end
 
@@ -777,7 +781,7 @@ defmodule Quiver.Pool.HTTP2.Connection do
         %{mode: :streaming, phase: :awaiting_headers, from: from} ->
           GenStateMachine.reply(from, {:error, reason})
 
-        %{mode: :streaming, demand_pid: pid} when pid != nil ->
+        %{mode: :streaming, consumer: pid} ->
           send(pid, {:error, ref, reason})
 
         _ ->
@@ -814,15 +818,15 @@ defmodule Quiver.Pool.HTTP2.Connection do
 
   defp maybe_stop_draining(data, _state), do: {:keep_state, data}
 
-  defp schedule_idle_timeout(ref) do
-    Process.send_after(self(), {:stream_idle_timeout, ref}, @stream_idle_timeout)
+  # The per-request `:receive_timeout`, when given, bounds the wait for each
+  # body chunk; otherwise the default applies.
+  defp schedule_idle_timeout(req, ref) do
+    Process.send_after(self(), {:stream_idle_timeout, ref}, req.idle_timeout)
   end
 
-  defp reschedule_idle_timeout(nil, ref), do: schedule_idle_timeout(ref)
-
-  defp reschedule_idle_timeout(timer, ref) do
-    Process.cancel_timer(timer)
-    schedule_idle_timeout(ref)
+  defp reschedule_idle_timeout(req, ref) do
+    cancel_idle_timer(req)
+    schedule_idle_timeout(req, ref)
   end
 
   defp cancel_idle_timer(%{idle_timer: nil}), do: :ok
@@ -856,11 +860,9 @@ defmodule Quiver.Pool.HTTP2.Connection do
     GenStateMachine.reply(from, {:error, err})
   end
 
-  defp reply_stream_error(%{mode: :streaming, demand_pid: pid}, ref, err) when pid != nil do
+  defp reply_stream_error(%{mode: :streaming, consumer: pid}, ref, err) do
     send(pid, {:error, ref, err})
   end
-
-  defp reply_stream_error(%{mode: :streaming}, _ref, _err), do: :ok
 
   defp reply_stream_error(%{from: from}, _ref, err) do
     GenStateMachine.reply(from, {:error, err})

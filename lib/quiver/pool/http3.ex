@@ -602,8 +602,10 @@ defmodule Quiver.Pool.HTTP3 do
     update_connection_stream_count(data, conn_pid, 1)
   end
 
+  # The worker uses `:receive_timeout` as the per-chunk body idle timeout, or
+  # its `:stream_idle_timeout` when the caller gave none.
   defp forward_stream(conn_pid, from, method, path, headers, body, opts, data) do
-    timeout = Keyword.get(opts, :receive_timeout, 15_000)
+    timeout = Keyword.get(opts, :receive_timeout)
     send(conn_pid, {:forward_stream, from, method, path, headers, body, timeout})
     update_connection_stream_count(data, conn_pid, 1)
   end

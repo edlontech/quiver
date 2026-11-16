@@ -57,7 +57,7 @@ children = [
 | `initial_max_streams` | `100` | Local guess for the peer's stream limit; used until the handshake supplies the actual value. |
 | `quic_opts` | `%{}` | Map passed straight to `:quic.connect/3` for transport-level tuning (idle timeout, MTU, etc.). |
 | `h3_settings` | `%{}` | Map of HTTP/3 `SETTINGS` to advertise to the peer (QPACK capacity, blocked streams, etc.). |
-| `stream_idle_timeout` | `30_000` | Milliseconds of consumer inactivity before a stream is reset and the caller receives `:idle_timeout`. |
+| `stream_idle_timeout` | `30_000` | Milliseconds without a body chunk before a stream is reset and the caller receives `:idle_timeout`. A per-request `:receive_timeout` overrides it for streamed responses. |
 | `verify` | `:verify_peer` | Forwarded to `:quic_h3`; use `:verify_none` for self-signed test setups. |
 | `cacerts` | (none) | DER-encoded CA list for `verify_peer`. |
 

@@ -21,7 +21,8 @@ if Code.ensure_loaded?(Tesla) do
 
       * `:name` - atom identifying the running `Quiver.Supervisor` (default: `Quiver.Pool`)
       * `:response` - set to `:stream` for streaming response body (default: buffered)
-      * `:receive_timeout` - max ms to wait per response chunk (default: 15,000)
+      * `:receive_timeout` - max ms to wait for the response, and with
+        `response: :stream` for each body chunk (see `Quiver.stream_request/2`)
 
     ## Streaming
 

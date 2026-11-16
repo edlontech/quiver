@@ -18,6 +18,8 @@ defmodule Quiver.Pool.HTTP1 do
   alias Quiver.Telemetry
   alias Quiver.Transport.SSL
 
+  @default_stream_timeout 15_000
+
   @derive {Inspect, only: [:origin]}
   defstruct [:origin, :config, :stats_table]
 
@@ -82,8 +84,9 @@ defmodule Quiver.Pool.HTTP1 do
         ) ::
           {:ok, StreamResponse.t()} | {:error, term()}
   def stream_request(pool, method, path, headers, body, opts \\ []) do
-    timeout = Keyword.get(opts, :receive_timeout, default_timeout(pool))
-    do_stream_checkout(pool, method, path, headers, body, timeout)
+    idle_timeout = Keyword.get(opts, :receive_timeout)
+    timeout = idle_timeout || @default_stream_timeout
+    do_stream_checkout(pool, method, path, headers, body, timeout, idle_timeout)
   end
 
   @impl Quiver.Pool
@@ -237,7 +240,7 @@ defmodule Quiver.Pool.HTTP1 do
     end
   end
 
-  defp do_stream_checkout(pool, method, path, headers, body, timeout) do
+  defp do_stream_checkout(pool, method, path, headers, body, timeout, idle_timeout) do
     origin = pool_origin(pool)
     caller = self()
     ref = make_ref()
@@ -249,7 +252,7 @@ defmodule Quiver.Pool.HTTP1 do
 
     receive do
       {^ref, {:ok, conn, status, resp_headers, initial_chunks}} ->
-        body_stream = build_body_stream(conn, initial_chunks, ref, keeper)
+        body_stream = build_body_stream(conn, initial_chunks, ref, keeper, idle_timeout)
 
         {:ok,
          %StreamResponse{
@@ -391,7 +394,12 @@ defmodule Quiver.Pool.HTTP1 do
     end
   end
 
-  defp build_body_stream(conn, initial_chunks, ref, keeper) do
+  # An explicit `:receive_timeout` bounds the wait for each body chunk; the
+  # pool's `:recv_timeout` is restored before the connection is returned.
+  defp build_body_stream(conn, initial_chunks, ref, keeper, idle_timeout) do
+    pool_timeout = conn.recv_timeout
+    conn = %{conn | recv_timeout: idle_timeout || pool_timeout}
+
     Stream.resource(
       fn -> {conn, initial_chunks} end,
       fn
@@ -408,10 +416,10 @@ defmodule Quiver.Pool.HTTP1 do
       fn
         {halted_conn, _} ->
           {:ok, closed} = HTTP1.close(halted_conn)
-          send(keeper, {ref, :done, closed})
+          send(keeper, {ref, :done, %{closed | recv_timeout: pool_timeout}})
 
         done_conn ->
-          send(keeper, {ref, :done, done_conn})
+          send(keeper, {ref, :done, %{done_conn | recv_timeout: pool_timeout}})
       end
     )
   end

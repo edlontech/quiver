@@ -473,8 +473,8 @@ defmodule Quiver.Pool.HTTP3.Connection do
     open_buffered_request(data, from, method, path, headers, body)
   end
 
-  def connected(:info, {:forward_stream, from, method, path, headers, body, _timeout}, data) do
-    open_streaming_request(data, from, method, path, headers, body)
+  def connected(:info, {:forward_stream, from, method, path, headers, body, timeout}, data) do
+    open_streaming_request(data, from, method, path, headers, body, timeout)
   end
 
   def connected(:info, {:forward_open_channel, from, method, path, headers, channel_opts}, data) do
@@ -731,8 +731,11 @@ defmodule Quiver.Pool.HTTP3.Connection do
     open_request(data, from, method, path, headers, body, :buffered)
   end
 
-  defp open_streaming_request(data, from, method, path, headers, body) do
-    open_request(data, from, method, path, headers, body, :streaming)
+  # The per-request `:receive_timeout`, when given, bounds the wait for each
+  # body chunk; otherwise the pool's `:stream_idle_timeout` applies.
+  defp open_streaming_request(data, from, method, path, headers, body, timeout) do
+    idle_timeout = timeout || data.stream_idle_timeout
+    open_request(data, from, method, path, headers, body, {:streaming, idle_timeout})
   end
 
   defp open_channel_request(data, from, method, path, headers, channel_opts) do
@@ -911,7 +914,10 @@ defmodule Quiver.Pool.HTTP3.Connection do
     }
   end
 
-  defp build_request(from, caller_pid, mon, sid, :streaming) do
+  # `consumer` is the last process to demand a chunk (initially the caller).
+  # Stream errors go there even when no demand is pending, so its next receive
+  # raises instead of waiting forever.
+  defp build_request(from, caller_pid, mon, sid, {:streaming, idle_timeout}) do
     %{
       from: from,
       caller_pid: caller_pid,
@@ -923,6 +929,8 @@ defmodule Quiver.Pool.HTTP3.Connection do
       trailers: [],
       pending_data: :queue.new(),
       demand_pid: nil,
+      consumer: caller_pid,
+      idle_timeout: idle_timeout,
       idle_timer: nil,
       stream_id: sid
     }
@@ -985,7 +993,7 @@ defmodule Quiver.Pool.HTTP3.Connection do
           | status: status,
             headers: headers,
             phase: :awaiting_body,
-            idle_timer: schedule_idle_timeout(data, ref)
+            idle_timer: schedule_idle_timeout(req, ref)
         }
 
         GenStateMachine.reply(req.from, {:ok, status, headers, ref, self()})
@@ -1170,12 +1178,12 @@ defmodule Quiver.Pool.HTTP3.Connection do
     %{req | pending_data: :queue.in(chunk, req.pending_data)}
   end
 
-  defp push_streaming_chunk(data, %{demand_pid: pid} = req, ref, chunk) when pid != nil do
+  defp push_streaming_chunk(_data, %{demand_pid: pid} = req, ref, chunk) when pid != nil do
     if chunk == <<>> do
       req
     else
       send(pid, {:chunk, ref, chunk})
-      timer = reschedule_idle_timeout(data, req.idle_timer, ref)
+      timer = reschedule_idle_timeout(req, ref)
       %{req | demand_pid: nil, idle_timer: timer}
     end
   end
@@ -1198,11 +1206,9 @@ defmodule Quiver.Pool.HTTP3.Connection do
     GenStateMachine.reply(from, {:error, err})
   end
 
-  defp reply_error(%{mode: :streaming, demand_pid: pid}, ref, err) when pid != nil do
+  defp reply_error(%{mode: :streaming, consumer: pid}, ref, err) do
     send(pid, {:error, ref, err})
   end
-
-  defp reply_error(%{mode: :streaming}, _ref, _err), do: :ok
 
   defp reply_error(%{mode: :datagram_channel, open_replied?: false, from: from}, _ref, err) do
     GenStateMachine.reply(from, {:error, err})
@@ -1245,8 +1251,9 @@ defmodule Quiver.Pool.HTTP3.Connection do
     case :queue.out(req.pending_data) do
       {{:value, chunk}, rest} ->
         send(consumer_pid, {:chunk, ref, chunk})
-        timer = reschedule_idle_timeout(data, req.idle_timer, ref)
-        {:keep_state, put_request(data, ref, %{req | pending_data: rest, idle_timer: timer})}
+        timer = reschedule_idle_timeout(req, ref)
+        req = %{req | pending_data: rest, consumer: consumer_pid, idle_timer: timer}
+        {:keep_state, put_request(data, ref, req)}
 
       {:empty, _} ->
         serve_demand_empty(data, ref, req, consumer_pid)
@@ -1262,8 +1269,9 @@ defmodule Quiver.Pool.HTTP3.Connection do
   end
 
   defp serve_demand_empty(data, ref, req, consumer_pid) do
-    timer = reschedule_idle_timeout(data, req.idle_timer, ref)
-    {:keep_state, put_request(data, ref, %{req | demand_pid: consumer_pid, idle_timer: timer})}
+    timer = reschedule_idle_timeout(req, ref)
+    req = %{req | demand_pid: consumer_pid, consumer: consumer_pid, idle_timer: timer}
+    {:keep_state, put_request(data, ref, req)}
   end
 
   defp handle_cancel_stream(data, ref) do
@@ -1410,7 +1418,7 @@ defmodule Quiver.Pool.HTTP3.Connection do
   defp handle_idle_timeout(data, ref) do
     case Map.fetch(data.requests, ref) do
       {:ok, %{mode: :streaming} = req} ->
-        if req.demand_pid, do: send(req.demand_pid, {:error, ref, :idle_timeout})
+        send(req.consumer, {:error, ref, :idle_timeout})
         _ = :quic_h3.cancel(data.h3_conn, req.stream_id)
         data = cleanup_request(data, ref, req.stream_id, req.monitor)
         notify_pool(data, :stream_done)
@@ -1421,15 +1429,13 @@ defmodule Quiver.Pool.HTTP3.Connection do
     end
   end
 
-  defp schedule_idle_timeout(data, ref) do
-    Process.send_after(self(), {:stream_idle_timeout, ref}, data.stream_idle_timeout)
+  defp schedule_idle_timeout(req, ref) do
+    Process.send_after(self(), {:stream_idle_timeout, ref}, req.idle_timeout)
   end
 
-  defp reschedule_idle_timeout(data, nil, ref), do: schedule_idle_timeout(data, ref)
-
-  defp reschedule_idle_timeout(data, timer, ref) do
-    Process.cancel_timer(timer)
-    schedule_idle_timeout(data, ref)
+  defp reschedule_idle_timeout(req, ref) do
+    cancel_idle_timer(req)
+    schedule_idle_timeout(req, ref)
   end
 
   defp cancel_idle_timer(%{idle_timer: nil}), do: :ok

@@ -172,7 +172,10 @@ defmodule Quiver do
   ## Options
 
   - `:name` -- atom identifying the `Quiver.Supervisor` (default: `Quiver.Pool`)
-  - `:receive_timeout` -- max ms to wait per response chunk (default: 15,000)
+  - `:receive_timeout` -- max ms to wait for the response headers and then
+    for each body chunk. Without it, headers wait up to 15,000 ms and body
+    chunks use the pool's idle timeout (HTTP/1 `:recv_timeout`, HTTP/2
+    30,000 ms, HTTP/3 `:stream_idle_timeout`).
 
   ## Examples
 
@@ -188,7 +191,6 @@ defmodule Quiver do
           {:ok, StreamResponse.t()} | {:error, term()}
   def stream_request(%Request{} = request, opts \\ []) do
     {name, opts} = Keyword.pop(opts, :name, @default_name)
-    timeout = Keyword.get(opts, :receive_timeout, @default_receive_timeout)
 
     do_request(request, name, fn pool ->
       pool_mod = detect_pool_module(pool)
@@ -199,7 +201,7 @@ defmodule Quiver do
         build_path(request.url),
         request.headers,
         request.body,
-        receive_timeout: timeout
+        Keyword.take(opts, [:receive_timeout])
       )
     end)
   end

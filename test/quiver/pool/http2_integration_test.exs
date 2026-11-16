@@ -170,6 +170,52 @@ defmodule Quiver.Pool.HTTP2IntegrationTest do
       assert {:ok, %Response{status: 200}} =
                Pool.request(pid, :get, "/", [], nil, receive_timeout: 5_000)
     end
+
+    test "receive_timeout bounds the wait between body chunks" do
+      pid = start_stalling_pool()
+
+      {:ok, %StreamResponse{body: body}} =
+        Pool.stream_request(pid, :get, "/", [], nil, receive_timeout: 200)
+
+      assert_raise Quiver.Error.StreamError, ~r/idle_timeout/, fn -> Enum.to_list(body) end
+    end
+
+    test "stream error reaches a consumer that was busy when it fired" do
+      pid = start_stalling_pool()
+
+      {:ok, %StreamResponse{body: body}} =
+        Pool.stream_request(pid, :get, "/", [], nil, receive_timeout: 200)
+
+      task =
+        Task.async(fn ->
+          try do
+            body |> Stream.each(fn _ -> Process.sleep(500) end) |> Stream.run()
+          rescue
+            e in Quiver.Error.StreamError -> e
+          end
+        end)
+
+      assert %Quiver.Error.StreamError{reason: :idle_timeout} = Task.await(task, 1_500)
+    end
+  end
+
+  defp start_stalling_pool do
+    {:ok, %{port: port, cacerts: cacerts}} =
+      start_server(fn conn ->
+        conn = Plug.Conn.send_chunked(conn, 200)
+        {:ok, conn} = Plug.Conn.chunk(conn, "first")
+        Process.sleep(2_000)
+        {:ok, conn} = Plug.Conn.chunk(conn, "late")
+        conn
+      end)
+
+    {:ok, pid} =
+      Pool.start_link(
+        origin: {:https, "127.0.0.1", port},
+        pool_opts: [verify: :verify_none, cacerts: cacerts]
+      )
+
+    pid
   end
 
   describe "connection recovery" do

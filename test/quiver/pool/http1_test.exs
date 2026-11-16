@@ -303,6 +303,27 @@ defmodule Quiver.Pool.HTTP1Test do
       GenServer.stop(pool)
       TestServer.stop(server)
     end
+
+    test "receive_timeout bounds the wait between body chunks" do
+      handler = fn conn ->
+        conn = Plug.Conn.send_chunked(conn, 200)
+        {:ok, conn} = Plug.Conn.chunk(conn, "first")
+        Process.sleep(2_000)
+        {:ok, conn} = Plug.Conn.chunk(conn, "late")
+        conn
+      end
+
+      {:ok, %{port: port} = server} = TestServer.start(handler)
+      {:ok, pool} = start_pool(port)
+
+      assert {:ok, %Quiver.StreamResponse{body: body}} =
+               Pool.stream_request(pool, :get, "/", [], nil, receive_timeout: 200)
+
+      assert_raise Quiver.Error.StreamError, fn -> Enum.to_list(body) end
+
+      GenServer.stop(pool)
+      TestServer.stop(server)
+    end
   end
 
   # -- Helpers --
